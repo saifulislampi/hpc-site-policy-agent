@@ -1,0 +1,43 @@
+{
+  "results": [
+    {
+      "title": "Anvil User Guide - RCAC Documentation",
+      "url": "https://docs.rcac.purdue.edu/userguides/anvil/",
+      "snippet": "Official Anvil user guide and documentation root."
+    },
+    {
+      "title": "Job Submission - RCAC Documentation",
+      "url": "https://docs.rcac.purdue.edu/userguides/anvil/jobs/",
+      "snippet": "Job submission on Anvil with Slurm accounts and partitions."
+    },
+    {
+      "title": "System Architecture - RCAC Documentation",
+      "url": "https://docs.rcac.purdue.edu/userguides/anvil/architecture/",
+      "snippet": "Anvil compute-node and interconnect architecture."
+    },
+    {
+      "title": "Bell User Guide: Basics of SLURM Jobs",
+      "url": "https://www.rcac.purdue.edu/knowledge/bell/run/slurm",
+      "snippet": "Bell job scheduling guidance."
+    },
+    {
+      "title": "Cluster Job Submission",
+      "url": "https://docs.rcac.purdue.edu/workshops/hpc/slurm-basics/",
+      "snippet": "General job submission documentation for RCAC clusters."
+    },
+    {
+      "title": "Purdue News",
+      "url": "https://www.purdue.edu/newsroom/example",
+      "snippet": "An unrelated university news page."
+    }
+  ],
+  "pages": {
+    "https://docs.rcac.purdue.edu/userguides/anvil/": "<html><head><title>Anvil User Guide - RCAC Documentation</title></head><body><main><h1>Anvil User Guide</h1><p>Official documentation for the Anvil supercomputer.</p><h2>User Guide</h2><a href='/userguides/anvil/jobs/'>Job Submission</a><a href='/userguides/anvil/architecture/'>System Architecture</a><a href='/userguides/anvil/faqs/'>Frequently Asked Questions</a><a href='/userguides/anvil/policies/'>Key Policies</a><a href='/userguides/bell/run/'>Bell Running Jobs</a></main></body></html>",
+    "https://docs.rcac.purdue.edu/userguides/anvil/jobs/": "<html><head><title>Job Submission - RCAC Documentation</title></head><body><main><h1>Job Submission on Anvil</h1><p>Anvil uses the Slurm Workload Manager.</p><h2>Job Submission Script</h2><p>Submit a job with sbatch. Account (-A or --account) is your allocation account. Partition (-p or --partition) selects a queue. Request wall time with --time and memory with --mem.</p></main></body></html>",
+    "https://docs.rcac.purdue.edu/userguides/anvil/architecture/": "<html><head><title>System Architecture - RCAC Documentation</title></head><body><main><h1>Anvil System Architecture</h1><h2>Compute Nodes</h2><p>Anvil compute nodes use a high-speed InfiniBand fabric with a two-stage fat-tree design.</p></main></body></html>",
+    "https://docs.rcac.purdue.edu/userguides/anvil/faqs/": "<html><head><title>Frequently Asked Questions - RCAC Documentation</title></head><body><main><h1>Anvil Frequently Asked Questions</h1><p>Contact Anvil support when documentation does not answer a question.</p></main></body></html>",
+    "https://docs.rcac.purdue.edu/userguides/anvil/policies/": "<html><head><title>Key Policies - RCAC Documentation</title></head><body><main><h1>Anvil Policies</h1><p>Software installation requests are reviewed by the Anvil team.</p></main></body></html>",
+    "https://www.rcac.purdue.edu/knowledge/bell/run/slurm": "<html><head><title>Bell User Guide: Basics of SLURM Jobs</title></head><body><main><h1>Bell Slurm Jobs</h1><p>Bell requires a Bell account and Bell partition.</p></main></body></html>",
+    "https://docs.rcac.purdue.edu/workshops/hpc/slurm-basics/": "<html><head><title>Cluster Job Submission</title></head><body><main><h1>Cluster Job Submission</h1><p>This is general RCAC Slurm training and does not state that every rule applies to Anvil.</p></main></body></html>"
+  }
+}

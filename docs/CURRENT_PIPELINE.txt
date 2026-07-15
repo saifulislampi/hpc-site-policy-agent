@@ -1,0 +1,73 @@
+HPC POLICY SCOUT — CURRENT NON-RAG PIPELINE
+
+CLI arguments + environment
+  → derive provider-neutral site identity
+  → generate canonical-root searches
+  → search approved organization domains
+  → classify every result
+       → target_site
+       → organization_general
+       → other_site (rejected)
+       → unrelated (rejected)
+  → rank candidates deterministically
+  → fetch the best canonical target-site root
+  → extract headings + sections + internal links
+  → follow target-site submission and networking links
+  → run focused submission searches
+  → run focused networking searches
+  → fetch + cache the best eligible pages
+  → calculate topic coverage
+       → evidence_found
+       → documentation_silent
+       → search_exhausted
+       → not_investigated
+  → provider-neutral discovery loop
+       → shared typed ToolDefinition values enter the selected provider adapter
+       → adapter translates tools to OpenAI | Claude | Gemini wire format
+       → provider chooses search_web | fetch_page | finish_discovery
+       → application validates and executes the tool
+       → result returns to the same provider conversation
+       → repeat until finish_discovery or max_steps
+  → reject unfetched, sibling-site, unrelated, and inapplicable general pages
+  → build topic-centered extraction excerpts from selected documents
+  → one provider structured-extraction call
+  → validate direct evidence + selected source URLs
+  → build detailed discovery report
+       → run metadata
+       → discovery queries + coverage
+       → selected and rejected source provenance
+       → flattened findings + evidence
+       → request and discovery statistics
+  → build compact candidate site policy
+       → actual profile values
+       → field status + source IDs
+       → validation summary
+       → required probes
+       → discovery-report provenance
+  → write outputs/<site>.discovery-report.json (or --output-dir)
+  → write outputs/<site>.site-policy.json (or --output-dir)
+  → write logs/<run-id>.jsonl (or --log-dir)
+  → keep full candidate rankings in the report and JSONL trace, not terminal output
+  → discard in-memory run state when the process exits
+
+NOT PRESENT YET
+
+selected documents
+  → chunk
+  → temporary retrieval index
+  → field-specific retrieval
+  → structured extraction
+  → discard index
+
+PROVIDER PLAN
+
+shared site identity + tools + schemas + artifact builders
+  → OpenAI adapter
+  → Claude adapter
+  → Gemini adapter
+
+Each adapter
+  → implements the same BaseProvider contract
+  → returns the same provider-neutral tool calls
+  → validates against the same extraction schema
+  → produces identical artifact shapes
