@@ -7,7 +7,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
-SiteScope = Literal["target_site", "organization_general", "other_site", "unrelated"]
+SiteScope = Literal["target_site", "organization_general", "sibling", "unrelated"]
+TrustLevel = Literal["official_web", "manifest_declared", "unverified_local"]
 TopicName = Literal["submission_policy", "networking_policy"]
 TopicCoverageStatus = Literal[
     "evidence_found",
@@ -31,6 +32,7 @@ class SiteIdentity(StrictModel):
 
 class SourceClassification(StrictModel):
     site_scope: SiteScope
+    trust_level: TrustLevel
     matched_aliases: list[str]
     conflicting_site_tokens: list[str]
     score: float
@@ -52,10 +54,17 @@ class DocumentLink(StrictModel):
     text: str
 
 
+class DocumentBlock(StrictModel):
+    kind: Literal["text", "code", "table"]
+    text: str
+
+
 class DocumentSection(StrictModel):
     heading: str
+    heading_path: list[str]
     text: str
     links: list[HttpUrl]
+    blocks: list[DocumentBlock]
 
 
 class TopicCoverage(StrictModel):
@@ -98,4 +107,3 @@ class FetchedDocument(StrictModel):
     relevant_text: str
     text_truncated: bool
     classification: SourceClassification
-

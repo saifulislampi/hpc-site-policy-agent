@@ -1,20 +1,33 @@
 # HPC Policy Scout
 
-The complete current non-RAG execution flow is maintained in
+The complete current agentic RAG execution flow is maintained in
 [`docs/CURRENT_PIPELINE.txt`](docs/CURRENT_PIPELINE.txt). It is updated whenever
 the pipeline changes.
+
+The persistent-corpus and retrieval rules are explained in
+[`docs/CORPUS_RAG.md`](docs/CORPUS_RAG.md).
 
 The two output contracts are described in
 [`docs/OUTPUT_ARTIFACTS.md`](docs/OUTPUT_ARTIFACTS.md), and the Claude/Gemini
 adapter plan is in [`docs/PROVIDER_ADAPTERS.md`](docs/PROVIDER_ADAPTERS.md).
 
-HPC Policy Scout is a bounded, site-aware documentation agent for onboarding an unfamiliar HPC site. From a site name, search keywords, and approved domains, it finds authoritative documentation and produces a structured JSON report covering:
+HPC Policy Scout is a bounded, site-aware agentic RAG system for onboarding an unfamiliar HPC site. From a site name, search keywords, and approved domains, it discovers authoritative pages, maintains a reusable text corpus, retrieves evidence per policy field, and produces structured JSON covering:
 
 - Slurm submission requirements and policy: account/allocation, partition or queue, walltime, memory, job-size, and charging notes.
 - Networking information relevant to manager/worker systems: compute-to-login, worker-to-worker, published port ranges, manager address guidance, and outbound access.
 - Explicit unknowns marked `requires_probe` when documentation is silent.
 
-Discovery is deterministic where it matters: it derives a target-site identity, locates a canonical guide root, crawls topic links, scores every candidate, and rejects sibling-cluster pages before the model sees extraction evidence. It tracks submission and networking coverage separately, so `documentation_status="silent"` means a reasonable target-specific search completed, while `documentation_status="discovery_failed"` means discovery could not establish adequate coverage.
+Discovery is deterministic where it matters: it derives a target-site identity,
+locates a canonical guide root, crawls topic links, and assigns source scope from
+URL paths rather than model judgment. Sibling pages are retained as measurable
+negative controls but excluded before retrieval scoring. Scope and trust are
+stored independently.
+
+The corpus persists canonical documents and chunks as JSONL. Tables stay atomic
+Markdown, Policies/FAQ sections stay whole, and ordinary chunks use zero
+overlap. A transient CPU-only BM25 index retrieves evidence independently for
+each output field; no vector database, embeddings, GPU, or new Python package is
+required.
 
 The agent only discovers documentation. It does not execute shell commands, submit jobs, scan ports, or modify an HPC system. Operational facts must later be verified by deterministic probes.
 
@@ -47,7 +60,8 @@ python main.py \
   --allowed-domain purdue.edu \
   --provider openai \
   --model gpt-5-mini \
-  --max-steps 2
+  --max-steps 2 \
+  --corpus-dir corpora/purdue-anvil
 ```
 
 TACC Stampede3:
@@ -73,6 +87,10 @@ Useful options:
 --search-budget N        Maximum deterministic search requests; default 8
 --page-budget N          Maximum uncached page requests; default 8
 --max-page-chars N       Maximum extracted characters per page
+--corpus-dir DIR          Persistent canonical documents/chunks directory
+--refresh-corpus          Replace changed rediscovered pages; retain unseen pages
+--chunk-chars N           Ordinary text chunk limit; default 1800
+--retrieval-top-k N       Chunks per ordinary extraction field; default 5
 --site-alias NAME        Additional target-site alias; repeatable
 --preferred-path-token T Target-site URL path token; repeatable
 --exclude-site-token T   Sibling-site token to reject; repeatable
@@ -105,14 +123,15 @@ python main.py \
 Each run creates:
 
 - `outputs/<site-id>-<timestamp>.discovery-report.json`: the detailed research artifact containing
-  run metadata, all selected/rejected source provenance, flattened findings,
-  evidence, coverage, and statistics.
+  run metadata, source scope/trust, corpus fingerprint, per-field retrieval
+  scores, retrieved-but-uncited chunks, exact chunk evidence, coverage, and
+  statistics.
 - `outputs/<site-id>-<timestamp>.site-policy.json`: the small candidate operational profile with
   normalized scheduler values, every documented submission option with exact
   syntax, partition limits, network values, storage placeholders, and
   section-level validation state. Evidence and source metadata remain in the
-  discovery report; the policy stores only its run ID, report path, and JSON
-  Pointer links to detailed findings.
+  discovery report; the policy stores its run ID, report path, corpus
+  ID/fingerprint, and JSON Pointer links to detailed findings.
 - A JSONL execution trace recording canonical-root selection, generated and repaired queries, candidate rankings, classifications, followed links, selected/rejected pages, request counts, token usage, and termination reason.
 
 Use `--output-dir` to place both JSON artifacts elsewhere. Explicit
@@ -122,7 +141,9 @@ receive the same timestamp.
 
 The CLI also prints concise, timestamped progress to stderr. Long model calls are announced before waiting and are bounded by `--api-timeout`; detailed diagnostics remain in the JSONL trace.
 
-Only fetched `target_site` pages and explicitly applicable `organization_general` pages can reach extraction. A page for another cluster may appear as a rejected discovery-report source, but it cannot be selected or cited.
+Only fetched `target_site` pages and explicitly applicable
+`organization_general` pages are eligible retrieval scopes. A sibling page can
+be stored and counted, but it cannot be retrieved or cited.
 
 Run tests with:
 

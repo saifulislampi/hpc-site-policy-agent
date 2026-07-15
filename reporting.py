@@ -15,9 +15,12 @@ from schemas import (
     PartitionsProfile,
     PolicyProvenance,
     PolicyValidation,
+    ReportCorpus,
     ReportEvidence,
+    ReportFieldRetrieval,
     ReportFinding,
     ReportRun,
+    ReportRetrievedChunk,
     ReportSource,
     SchedulerProfile,
     SiteDescriptor,
@@ -37,7 +40,9 @@ FINDING_PATHS = {
     "walltime_policy": "submission.walltime_policy",
     "memory_policy": "submission.memory_policy",
     "job_size_policy": "submission.job_size_policy",
-    "charging_policy": "submission.charging_policy",
+    "charging_model": "submission.charging_model",
+    "purge_policy": "storage.purge_policy",
+    "cost_traps": "submission.cost_traps",
     "manager_worker_connectivity": "network.manager_worker",
     "worker_worker_connectivity": "network.worker_worker",
     "published_port_range": "network.published_port_range",
@@ -65,8 +70,17 @@ def build_run_artifacts(
     discovery_report_reference: str,
     termination_reason: str,
     metrics: dict[str, Any],
+    corpus_snapshot: Any,
+    retrievals: dict[str, Any],
+    citation_audit: dict[str, Any],
+    corpus_manifest_reference: str,
 ) -> RunArtifacts:
-    sources, source_ids = _build_sources(tools)
+    retrieved_urls = {
+        str(hit.chunk.source_url)
+        for retrieval in retrievals.values()
+        for hit in retrieval.hits
+    }
+    sources, source_ids = _build_sources(tools, retrieved_urls)
     findings = _build_findings(extracted, source_ids)
     coverage = ArtifactCoverage(
         submission=_coverage_status(extracted.discovery_coverage.submission_policy.status),
@@ -86,15 +100,31 @@ def build_run_artifacts(
             "coverage": coverage,
             "termination_reason": termination_reason,
         },
+        corpus=ReportCorpus(
+            corpus_id=corpus_snapshot.manifest.corpus_id,
+            corpus_fingerprint=corpus_snapshot.manifest.corpus_fingerprint,
+            manifest=corpus_manifest_reference,
+            document_count=corpus_snapshot.manifest.document_count,
+            chunk_count=corpus_snapshot.manifest.chunk_count,
+        ),
         sources=sources,
+        retrieval=_build_retrieval_report(
+            retrievals, citation_audit, source_ids
+        ),
         findings=findings,
         unresolved_questions=extracted.unresolved_questions,
         statistics={
             "search_calls": metrics.get("search_requests", 0),
             "pages_fetched": metrics.get("page_requests", 0),
             "target_site_pages": metrics.get("fetched_target_documents", 0),
-            "rejected_other_site_pages": sum(
-                source.site_scope == "other_site" for source in sources
+            "sibling_sources": sum(source.site_scope == "sibling" for source in sources),
+            "sibling_chunks": sum(
+                chunk.site_scope == "sibling" for chunk in corpus_snapshot.chunks
+            ),
+            "retrieved_sibling_chunks": sum(
+                hit.chunk.site_scope == "sibling"
+                for retrieval in retrievals.values()
+                for hit in retrieval.hits
             ),
             "model_requests": metrics.get("model_requests", 0),
             "input_tokens": metrics.get("total_input_tokens", 0),
@@ -106,11 +136,16 @@ def build_run_artifacts(
         site_id=site_id,
         discovery_report_reference=discovery_report_reference,
         run_id=run_id,
+        corpus_id=corpus_snapshot.manifest.corpus_id,
+        corpus_fingerprint=corpus_snapshot.manifest.corpus_fingerprint,
     )
     return RunArtifacts(discovery_report=discovery_report, site_policy=site_policy)
 
 
-def _build_sources(tools: Any) -> tuple[list[ReportSource], dict[str, str]]:
+def _build_sources(
+    tools: Any,
+    retrieved_urls: set[str],
+) -> tuple[list[ReportSource], dict[str, str]]:
     candidates = list(getattr(tools, "candidates", {}).values())
     candidates.sort(
         key=lambda item: (
@@ -125,7 +160,9 @@ def _build_sources(tools: Any) -> tuple[list[ReportSource], dict[str, str]]:
         url = str(candidate.url)
         source_id = f"S{index}"
         source_ids[url] = source_id
-        document = getattr(tools, "documents", {}).get(url)
+        document = getattr(tools, "documents", {}).get(url) or getattr(
+            tools, "rejected_documents", {}
+        ).get(url)
         title = document.title if document is not None else candidate.title
         sources.append(
             ReportSource(
@@ -133,7 +170,9 @@ def _build_sources(tools: Any) -> tuple[list[ReportSource], dict[str, str]]:
                 url=url,
                 title=title or url,
                 site_scope=candidate.classification.site_scope,
+                trust_level=candidate.classification.trust_level,
                 selected=candidate.selected,
+                retrieved=url in retrieved_urls,
                 rejection_reason=candidate.rejection_reason,
             )
         )
@@ -156,6 +195,7 @@ def _build_findings(
                 explanation=finding.explanation,
                 evidence=[
                     ReportEvidence(
+                        chunk_id=item.chunk_id,
                         source_id=source_ids[str(item.source_url)],
                         heading=item.heading,
                         quote=item.quote,
@@ -173,6 +213,8 @@ def _build_site_policy(
     site_id: str,
     discovery_report_reference: str,
     run_id: str,
+    corpus_id: str,
+    corpus_fingerprint: str,
 ) -> SitePolicyArtifact:
     slurm = extracted.slurm_policy
     network = extracted.network_policy
@@ -235,6 +277,8 @@ def _build_site_policy(
         provenance=PolicyProvenance(
             discovery_report=discovery_report_reference,
             run_id=run_id,
+            corpus_id=corpus_id,
+            corpus_fingerprint=corpus_fingerprint,
             references={
                 "/scheduler/type": "/findings/scheduler.type",
                 "/scheduler/submit_command": "/findings/scheduler.submit_command",
@@ -251,6 +295,35 @@ def _build_site_policy(
             },
         ),
     )
+
+
+def _build_retrieval_report(
+    retrievals: dict[str, Any],
+    citation_audit: dict[str, Any],
+    source_ids: dict[str, str],
+) -> dict[str, ReportFieldRetrieval]:
+    result: dict[str, ReportFieldRetrieval] = {}
+    for field, retrieval in retrievals.items():
+        cited = {
+            item["chunk_id"]
+            for item in citation_audit[field]["retrieved"]
+            if item["cited"]
+        }
+        result[field] = ReportFieldRetrieval(
+            query=retrieval.query,
+            allowed_scopes=retrieval.allowed_scopes,
+            chunks=[
+                ReportRetrievedChunk(
+                    chunk_id=hit.chunk.chunk_id,
+                    source_id=source_ids[str(hit.chunk.source_url)],
+                    score=hit.score,
+                    cited=hit.chunk.chunk_id in cited,
+                )
+                for hit in retrieval.hits
+            ],
+            excluded_scope_counts=retrieval.excluded_scope_counts,
+        )
+    return result
 
 
 def _coverage_status(status: str) -> str:

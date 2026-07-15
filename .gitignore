@@ -1,5 +1,6 @@
 .env
 logs/
+corpora/
 outputs/
 
 __pycache__/

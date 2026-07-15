@@ -1,75 +1,77 @@
-HPC POLICY SCOUT — CURRENT NON-RAG PIPELINE
+HPC SITE POLICY AGENT — CURRENT PIPELINE
 
 CLI arguments + environment
   → derive provider-neutral site identity
-  → generate canonical-root searches
+  → generate bounded canonical-root + policy searches
   → search approved organization domains
-  → classify every result
+  → classify scope deterministically from URL path / manifest-equivalent identity
        → target_site
        → organization_general
-       → other_site (rejected)
-       → unrelated (rejected)
-  → rank candidates deterministically
-  → fetch the best canonical target-site root
-  → extract headings + sections + internal links
-  → follow target-site submission and networking links
-  → run focused submission searches
-  → run focused networking searches
-  → fetch + cache the best eligible pages
-  → calculate topic coverage
-       → evidence_found
-       → documentation_silent
-       → search_exhausted
-       → not_investigated
-  → provider-neutral discovery loop
-       → shared typed ToolDefinition values enter the selected provider adapter
-       → adapter translates tools to OpenAI | Claude | Gemini wire format
-       → provider chooses search_web | fetch_page | finish_discovery
-       → application validates and executes the tool
-       → result returns to the same provider conversation
-       → repeat until finish_discovery or max_steps
-  → reject unfetched, sibling-site, unrelated, and inapplicable general pages
-  → build topic-centered extraction excerpts from selected documents
-  → one provider structured-extraction call
-  → validate direct evidence + selected source URLs
+       → sibling
+       → unrelated
+     and assign trust independently
+       → official_web
+       → manifest_declared (reserved)
+       → unverified_local (reserved)
+  → fetch canonical root + high-value submission/networking pages
+  → retain a fetched sibling page as a negative control when budget permits
+  → calculate deterministic topic coverage
+  → bounded provider discovery loop
+       → search_web | fetch_page | finish_discovery
+       → validate every tool call and selected URL locally
+       → stop at finish_discovery or max_steps
+  → construct canonical web corpus records
+       → preserve URL, scope, trust, headings, hashes, and fetched timestamp
+       → keep tables atomic as Markdown
+       → keep Policies and FAQ sections whole
+       → split ordinary text at natural boundaries
+       → overlap_chars = 0
+       → skip PDFs for corpus retrieval
+  → merge into corpora/<site-id>/
+       → manifest.json
+       → documents.jsonl
+       → chunks.jsonl
+       → never persist a retrieval index
+       → --refresh-corpus replaces changed rediscovered pages
+       → pages not rediscovered remain stored
+  → build a transient CPU BM25 index
+  → retrieve separately for every extraction field
+       → site_scope is an input filter before ranking
+       → allow target_site + applicable organization_general
+       → exclude sibling + unrelated
+       → include charging_model + purge_policy + cost_traps
+       → retain whole Policies/FAQ candidates for those fields
+  → one provider structured-extraction call over field-grouped chunks
+  → validate every evidence item locally
+       → chunk_id belongs to that field's retrieved list
+       → evidence URL matches the chunk URL
+       → quote is a literal substring of the chunk
+  → log every retrieved chunk, score, citation state, and retrieved-but-uncited ID
   → build detailed discovery report
-       → run metadata
-       → discovery queries + coverage
-       → selected and rejected source provenance
-       → flattened findings + evidence
-       → request and discovery statistics
+       → run, discovery, source scope/trust, corpus fingerprint
+       → field retrieval audit + scores
+       → findings + chunk/source evidence
+       → sibling retained/retrieved counts
   → build compact candidate site policy
-       → scheduler type + submit command
-       → every documented submission option + exact syntax + required boolean
-       → partition defaults + limits
-       → network values + null storage placeholders
-       → section-level validation state
-       → JSON Pointer references to detailed findings
-       → no evidence duplication
-  → write outputs/<site>-<timestamp>.discovery-report.json (or explicit path)
-  → write outputs/<site>-<timestamp>.site-policy.json (or explicit path)
-  → write logs/<run-id>.jsonl (or --log-dir)
-  → keep full candidate rankings in the report and JSONL trace, not terminal output
-  → discard in-memory run state when the process exits
+       → consumer-ready values only
+       → provenance references detailed findings + corpus fingerprint
+  → write timestamped report + site-policy JSON
+  → write JSONL execution trace
 
-NOT PRESENT YET
+CURRENTLY OUTSIDE THE CRITICAL PATH
 
-selected documents
-  → chunk
-  → temporary retrieval index
-  → field-specific retrieval
-  → structured extraction
-  → discard index
+  → local document ingestion
+  → PDF corpus ingestion
+  → persisted vector/search index
+  → embeddings or GPU inference
+  → Claude/Gemini production adapters
 
-PROVIDER PLAN
+PROVIDER BOUNDARY
 
-shared site identity + tools + schemas + artifact builders
-  → OpenAI adapter
-  → Claude adapter
-  → Gemini adapter
+shared discovery + corpus + retrieval + validation + reporting
+  → OpenAI adapter now
+  → Claude adapter later
+  → Gemini adapter later
 
-Each adapter
-  → implements the same BaseProvider contract
-  → returns the same provider-neutral tool calls
-  → validates against the same extraction schema
-  → produces identical artifact shapes
+Adapters translate API wire formats only. Scope, trust, chunking, retrieval,
+validation, and artifact construction stay provider-neutral.

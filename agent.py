@@ -19,7 +19,13 @@ from prompts import (
 )
 from providers.base import BaseProvider
 from reporting import RunArtifacts, build_run_artifacts
-from schemas import DiscoverySelection, ExtractedPolicy
+from corpus import CorpusStore, LexicalRetriever, build_corpus_records
+from schemas import (
+    ChunkerConfiguration,
+    DiscoverySelection,
+    ExtractedPolicy,
+    FieldRetrieval,
+)
 from tools import ScoutTools
 
 
@@ -46,10 +52,18 @@ class HPCPolicyScoutAgent:
         tools: ScoutTools,
         max_steps: int = 10,
         log_dir: str | Path = "logs",
+        corpus_dir: str | Path = "corpora/default",
+        refresh_corpus: bool = False,
+        chunk_chars: int = 1800,
+        retrieval_top_k: int = 5,
     ) -> None:
         self.provider = provider
         self.tools = tools
         self.max_steps = max_steps
+        self.corpus_store = CorpusStore(corpus_dir)
+        self.refresh_corpus = refresh_corpus
+        self.chunk_chars = chunk_chars
+        self.retrieval_top_k = retrieval_top_k
         self.run_id = str(uuid.uuid4())
         self.logger = JsonlRunLogger(log_dir=Path(log_dir), run_id=self.run_id)
         self._model_requests = 0
@@ -91,33 +105,92 @@ class HPCPolicyScoutAgent:
             allowed_domains=allowed_domains,
             discovery_context=discovery_context,
         )
-        documents = self.tools.selected_documents(selection)
+        selected_documents = self.tools.selected_documents(selection)
 
         self.logger.write(
             "discovery_complete",
             {
                 "selection": selection.model_dump(mode="json"),
-                "document_count": len(documents),
+                "document_count": len(selected_documents),
                 "metrics": self._run_metrics(selection=selection),
+            },
+        )
+
+        self._progress("Chunking and merging discovered web pages into the corpus")
+        corpus_documents = (
+            self.tools.corpus_documents()
+            if hasattr(self.tools, "corpus_documents")
+            else selected_documents
+        )
+        now = datetime.now(timezone.utc)
+        stored_documents, stored_chunks = build_corpus_records(
+            corpus_documents,
+            maximum_chars=self.chunk_chars,
+            fetched_at=now,
+        )
+        snapshot = self.corpus_store.merge(
+            corpus_id=site_id,
+            site_identity=self.tools.site_identity,
+            incoming_documents=stored_documents,
+            incoming_chunks=stored_chunks,
+            chunker=ChunkerConfiguration(maximum_chars=self.chunk_chars),
+            refresh=self.refresh_corpus,
+            now=now,
+        )
+        sibling_chunks = sum(
+            chunk.site_scope == "sibling" for chunk in snapshot.chunks
+        )
+        self._progress(
+            f"Corpus ready: {len(snapshot.chunks)} reusable chunks "
+            f"({sibling_chunks} sibling chunks retained)"
+        )
+
+        retrievals = LexicalRetriever(snapshot.chunks).retrieve_all(
+            allowed_scopes={"target_site", "organization_general"},
+            top_k=self.retrieval_top_k,
+        )
+        retrieved_siblings = sum(
+            hit.chunk.site_scope == "sibling"
+            for retrieval in retrievals.values()
+            for hit in retrieval.hits
+        )
+        self._progress(
+            f"Retrieved chunks for {len(retrievals)} fields: "
+            f"{sibling_chunks} sibling chunks, {retrieved_siblings} retrieved"
+        )
+        self.logger.write(
+            "retrieval_complete",
+            {
+                "corpus_id": snapshot.manifest.corpus_id,
+                "corpus_fingerprint": snapshot.manifest.corpus_fingerprint,
+                "sibling_chunks": sibling_chunks,
+                "retrieved_sibling_chunks": retrieved_siblings,
+                "fields": {
+                    field: retrieval.model_dump(mode="json")
+                    for field, retrieval in retrievals.items()
+                },
             },
         )
 
         extraction_input = build_extraction_input(
             site_name=site_name,
-            documents=documents,
+            retrievals=retrievals,
             discovery_summary=selection.summary,
             unanswered_topics=selection.unanswered_topics,
             discovery_coverage=selection.coverage,
         )
         self._progress(
-            f"Extracting policy report from {len(documents)} selected documents"
+            "Extracting policy report from "
+            f"{sum(len(item.hits) for item in retrievals.values())} "
+            "field-ranked chunks"
         )
         report = self.provider.extract_report(
             system_prompt=EXTRACTION_SYSTEM_PROMPT,
             user_prompt=extraction_input,
         )
         report.discovery_coverage = selection.coverage
-        self._validate_report_sources(report, documents)
+        citation_audit = self._validate_report_evidence(report, retrievals)
+        self.logger.write("retrieval_citation_audit", citation_audit)
         self._progress("Structured extraction completed")
 
         metrics = self._run_metrics(selection=selection, extraction_complete=True)
@@ -132,6 +205,10 @@ class HPCPolicyScoutAgent:
             discovery_report_reference=discovery_report_reference,
             termination_reason=selection.termination_reason,
             metrics=metrics,
+            corpus_snapshot=snapshot,
+            retrievals=retrievals,
+            citation_audit=citation_audit,
+            corpus_manifest_reference=str(self.corpus_store.manifest_path),
         )
         self._progress("Built discovery-report and candidate site-policy artifacts")
 
@@ -214,28 +291,62 @@ class HPCPolicyScoutAgent:
         raise AgentError(f"Discovery exceeded the maximum of {self.max_steps} steps.")
 
     @staticmethod
-    def _validate_report_sources(report: ExtractedPolicy, documents: list[Any]) -> None:
-        selected_urls = {str(document.url) for document in documents}
+    def _validate_report_evidence(
+        report: ExtractedPolicy,
+        retrievals: dict[str, FieldRetrieval],
+    ) -> dict[str, Any]:
+        retrieved_urls = {
+            str(hit.chunk.source_url)
+            for retrieval in retrievals.values()
+            for hit in retrieval.hits
+        }
         report_urls = {str(source.url) for source in report.sources}
-        unexpected_sources = report_urls - selected_urls
+        unexpected_sources = report_urls - retrieved_urls
         if unexpected_sources:
             raise AgentError(
-                "Final report cited sources outside the selected target-site set: "
+                "Final report cited sources outside the retrieved chunk set: "
                 + ", ".join(sorted(unexpected_sources))
             )
-
-        evidence_urls = {
-            str(evidence.source_url)
-            for policy in (report.slurm_policy, report.network_policy)
-            for finding in policy.__dict__.values()
-            for evidence in finding.evidence
-        }
-        unexpected_evidence = evidence_urls - selected_urls
-        if unexpected_evidence:
-            raise AgentError(
-                "Final report evidence used an unselected source: "
-                + ", ".join(sorted(unexpected_evidence))
-            )
+        audit: dict[str, Any] = {}
+        for policy in (report.slurm_policy, report.network_policy):
+            for field, finding in policy.__dict__.items():
+                retrieval = retrievals[field]
+                hits = {hit.chunk.chunk_id: hit for hit in retrieval.hits}
+                cited: set[str] = set()
+                for evidence in finding.evidence:
+                    hit = hits.get(evidence.chunk_id)
+                    if hit is None:
+                        raise AgentError(
+                            f"Evidence for {field} cites chunk {evidence.chunk_id} "
+                            "outside that field's retrieved list."
+                        )
+                    if str(evidence.source_url) != str(hit.chunk.source_url):
+                        raise AgentError(
+                            f"Evidence URL for {field} does not match chunk "
+                            f"{evidence.chunk_id}."
+                        )
+                    if evidence.quote not in hit.chunk.text:
+                        raise AgentError(
+                            f"Evidence quote for {field} is not a literal substring "
+                            f"of chunk {evidence.chunk_id}."
+                        )
+                    cited.add(evidence.chunk_id)
+                audit[field] = {
+                    "retrieved": [
+                        {
+                            "chunk_id": hit.chunk.chunk_id,
+                            "score": hit.score,
+                            "cited": hit.chunk.chunk_id in cited,
+                        }
+                        for hit in retrieval.hits
+                    ],
+                    "retrieved_but_uncited": [
+                        hit.chunk.chunk_id
+                        for hit in retrieval.hits
+                        if hit.chunk.chunk_id not in cited
+                    ],
+                }
+        return audit
 
     def _log_turn(self, step: int, turn: ModelTurn) -> None:
         self._model_requests += 1
@@ -286,6 +397,10 @@ class HPCPolicyScoutAgent:
             self._progress(f"Fetched page {count}/{budget}: {payload.get('url')}")
         elif event == "page_fetch_failed":
             self._progress(f"Skipped failed page: {payload.get('url')}")
+        elif event == "sibling_control_fetch":
+            self._progress(
+                f"Retaining sibling negative-control page: {payload.get('url')}"
+            )
         elif event == "coverage":
             submission = payload.get("submission_policy", {}).get("status")
             networking = payload.get("networking_policy", {}).get("status")

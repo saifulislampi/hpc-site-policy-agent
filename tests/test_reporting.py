@@ -1,9 +1,11 @@
+import re
 from datetime import datetime, timezone
 
 from agent import HPCPolicyScoutAgent
 from models import ModelTurn, ToolCall
 from reporting import build_run_artifacts
-from schemas import ExtractedPolicy
+from corpus import CorpusStore, LexicalRetriever, build_corpus_records
+from schemas import ChunkerConfiguration, ExtractedPolicy
 from test_discovery import make_anvil_tools
 
 
@@ -40,10 +42,29 @@ class ArtifactProvider:
 
     def extract_report(self, *, system_prompt, user_prompt):
         self.last_extraction_usage = {"input_tokens": 200, "output_tokens": 100}
-        return make_extracted_policy(self.tools)
+        evidence = {}
+        for field, body in re.findall(
+            r"--- FIELD (\w+) RETRIEVED CHUNKS START ---(.*?)"
+            r"--- FIELD \1 RETRIEVED CHUNKS END ---",
+            user_prompt,
+            flags=re.DOTALL,
+        ):
+            chunks = re.findall(
+                r"CHUNK ID: (\S+).*?URL: (\S+).*?TITLE: (.*?)\n.*?"
+                r"HEADING PATH: (.*?)\nCHUNK TEXT:\n(.*?)\nEND CHUNK \1",
+                body,
+                flags=re.DOTALL,
+            )
+            preferred = next((item for item in chunks if item[1] == JOBS_URL), None)
+            chosen = preferred or (chunks[0] if chunks else None)
+            if chosen:
+                evidence[field] = chosen
+        return make_extracted_policy(self.tools, evidence)
 
 
-def documented(value):
+def documented(value, field, evidence_map):
+    chunk_id, source_url, title, heading, text = evidence_map[field]
+    quote = next(line.strip() for line in text.splitlines() if line.strip())
     return {
         "value": value,
         "status": "documented",
@@ -52,10 +73,11 @@ def documented(value):
         "explanation": "The target-site job guide directly documents this value.",
         "evidence": [
             {
-                "source_url": JOBS_URL,
-                "source_title": "Anvil Job Submission",
-                "heading": "Job Submission Script",
-                "quote": "Use an account and partition when submitting the job.",
+                "chunk_id": chunk_id,
+                "source_url": source_url,
+                "source_title": title,
+                "heading": heading,
+                "quote": quote,
                 "interpretation": "direct",
             }
         ],
@@ -73,22 +95,24 @@ def requires_probe():
     }
 
 
-def make_extracted_policy(tools):
+def make_extracted_policy(tools, evidence_map):
+    source_urls = sorted({item[1] for item in evidence_map.values()})
     return ExtractedPolicy.model_validate(
         {
             "site_name": "Purdue Anvil",
             "sources": [
                 {
-                    "url": JOBS_URL,
-                    "title": "Anvil Job Submission",
+                    "url": url,
+                    "title": "Retrieved official documentation",
                     "authority": "official",
                     "relevance": "Target-site submission policy.",
                 }
+                for url in source_urls
             ],
             "discovery_coverage": tools.discovery_coverage().model_dump(mode="json"),
             "slurm_policy": {
-                "scheduler": documented("slurm"),
-                "submit_command": documented("sbatch"),
+                "scheduler": documented("slurm", "scheduler", evidence_map),
+                "submit_command": documented("sbatch", "submit_command", evidence_map),
                 "submission_options": documented(
                     [
                         {
@@ -112,10 +136,10 @@ def make_extracted_policy(tools):
                             "example": "--mem=8G",
                             "value": None,
                         },
-                    ]
+                    ], "submission_options", evidence_map
                 ),
-                "account_allocation_policy": documented("Use the allocation account."),
-                "default_partition": documented("shared"),
+                "account_allocation_policy": documented("Use the allocation account.", "account_allocation_policy", evidence_map),
+                "default_partition": documented("shared", "default_partition", evidence_map),
                 "partitions": documented(
                     [
                         {
@@ -130,12 +154,14 @@ def make_extracted_policy(tools):
                             "maximum_nodes": 16,
                             "shared_nodes": False,
                         },
-                    ]
+                    ], "partitions", evidence_map
                 ),
-                "walltime_policy": documented("Partition-dependent limits apply."),
-                "memory_policy": documented("Request memory in the job script."),
-                "job_size_policy": documented("Partition-dependent node limits apply."),
-                "charging_policy": documented("Jobs charge the selected allocation."),
+                "walltime_policy": documented("Partition-dependent limits apply.", "walltime_policy", evidence_map),
+                "memory_policy": documented("Request memory in the job script.", "memory_policy", evidence_map),
+                "job_size_policy": documented("Partition-dependent node limits apply.", "job_size_policy", evidence_map),
+                "charging_model": documented("Jobs charge the selected allocation.", "charging_model", evidence_map),
+                "purge_policy": documented("A documented purge policy applies.", "purge_policy", evidence_map),
+                "cost_traps": documented("Review documented charging cautions.", "cost_traps", evidence_map),
             },
             "network_policy": {
                 "manager_worker_connectivity": requires_probe(),
@@ -151,7 +177,52 @@ def make_extracted_policy(tools):
     )
 
 
-def test_builds_detailed_and_compact_artifacts():
+def prepare_rag(tools, tmp_path):
+    documents, chunks = build_corpus_records(
+        tools.corpus_documents(),
+        maximum_chars=1800,
+        fetched_at=datetime.now(timezone.utc),
+    )
+    snapshot = CorpusStore(tmp_path / "corpus").merge(
+        corpus_id="purdue-anvil",
+        site_identity=tools.site_identity,
+        incoming_documents=documents,
+        incoming_chunks=chunks,
+        chunker=ChunkerConfiguration(maximum_chars=1800),
+        refresh=False,
+        now=datetime.now(timezone.utc),
+    )
+    retrievals = LexicalRetriever(snapshot.active_chunks).retrieve_all(
+        allowed_scopes={"target_site", "organization_general"}, top_k=5
+    )
+    evidence_map = {
+        field: (
+            hit.chunk.chunk_id,
+            str(hit.chunk.source_url),
+            hit.chunk.title,
+            " > ".join(hit.chunk.heading_path),
+            hit.chunk.text,
+        )
+        for field, retrieval in retrievals.items()
+        if (hit := next((x for x in retrieval.hits if str(x.chunk.source_url) == JOBS_URL), retrieval.hits[0] if retrieval.hits else None))
+    }
+    audit = {
+        field: {
+            "retrieved": [
+                {"chunk_id": hit.chunk.chunk_id, "score": hit.score, "cited": hit.chunk.chunk_id == evidence_map.get(field, (None,))[0]}
+                for hit in retrieval.hits
+            ],
+            "retrieved_but_uncited": [
+                hit.chunk.chunk_id for hit in retrieval.hits
+                if hit.chunk.chunk_id != evidence_map.get(field, (None,))[0]
+            ],
+        }
+        for field, retrieval in retrievals.items()
+    }
+    return snapshot, retrievals, evidence_map, audit
+
+
+def test_builds_detailed_and_compact_artifacts(tmp_path):
     tools = make_anvil_tools()
     tools.bootstrap_discovery(keywords=[])
     result = tools._finish_discovery(
@@ -161,7 +232,8 @@ def test_builds_detailed_and_compact_artifacts():
             "unanswered_topics": ["Networking policy"],
         }
     )
-    extracted = make_extracted_policy(tools)
+    snapshot, retrievals, evidence_map, audit = prepare_rag(tools, tmp_path)
+    extracted = make_extracted_policy(tools, evidence_map)
 
     artifacts = build_run_artifacts(
         extracted=extracted,
@@ -181,6 +253,10 @@ def test_builds_detailed_and_compact_artifacts():
             "total_input_tokens": 1000,
             "total_output_tokens": 500,
         },
+        corpus_snapshot=snapshot,
+        retrievals=retrievals,
+        citation_audit=audit,
+        corpus_manifest_reference=str(tmp_path / "corpus" / "manifest.json"),
     )
 
     report = artifacts.discovery_report
@@ -218,7 +294,7 @@ def test_builds_detailed_and_compact_artifacts():
     )
 
 
-def test_compact_policy_separates_values_status_and_probes():
+def test_compact_policy_separates_values_status_and_probes(tmp_path):
     tools = make_anvil_tools()
     tools.bootstrap_discovery(keywords=[])
     tools._finish_discovery(
@@ -228,8 +304,9 @@ def test_compact_policy_separates_values_status_and_probes():
             "unanswered_topics": ["Networking"],
         }
     )
+    snapshot, retrievals, evidence_map, audit = prepare_rag(tools, tmp_path)
     artifacts = build_run_artifacts(
-        extracted=make_extracted_policy(tools),
+        extracted=make_extracted_policy(tools, evidence_map),
         tools=tools,
         run_id="run-456",
         provider="gemini",
@@ -239,6 +316,10 @@ def test_compact_policy_separates_values_status_and_probes():
         discovery_report_reference="purdue-anvil.discovery-report.json",
         termination_reason="test",
         metrics=tools.discovery_metrics(),
+        corpus_snapshot=snapshot,
+        retrievals=retrievals,
+        citation_audit=audit,
+        corpus_manifest_reference=str(tmp_path / "corpus" / "manifest.json"),
     )
     dumped = artifacts.site_policy.model_dump(mode="json")
 
@@ -257,6 +338,7 @@ def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
         tools=tools,
         max_steps=2,
         log_dir=tmp_path,
+        corpus_dir=tmp_path / "corpus",
     )
 
     artifacts = agent.run(
@@ -270,6 +352,14 @@ def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
 
     assert artifacts.discovery_report.run.model == "mock-model"
     assert artifacts.site_policy.scheduler.submit_command == "sbatch"
+    assert artifacts.discovery_report.statistics.sibling_chunks > 0
+    assert artifacts.discovery_report.statistics.retrieved_sibling_chunks == 0
+    assert any(
+        not chunk.cited
+        for retrieval in artifacts.discovery_report.retrieval.values()
+        for chunk in retrieval.chunks
+    )
+    assert artifacts.site_policy.provenance.corpus_fingerprint.startswith("sha256:")
     assert "Search 1/8" in progress
     assert "Waiting for the discovery model" in progress
     assert "Extracting policy report" in progress

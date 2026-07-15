@@ -50,7 +50,9 @@ TOPIC_TERMS: dict[TopicName, frozenset[str]] = {
 }
 
 ROOT_TERMS = frozenset({"user", "guide", "documentation", "docs", "overview"})
-PATH_SCOPE_MARKERS = frozenset({"knowledge", "userguides", "clusters", "systems"})
+PATH_SCOPE_MARKERS = frozenset(
+    {"knowledge", "userguides", "clusters", "systems", "hpc"}
+)
 GENERIC_PATH_TOKENS = frozenset(
     {
         "hpc",
@@ -64,6 +66,8 @@ GENERIC_PATH_TOKENS = frozenset(
         "shared",
         "policies",
         "policy",
+        "faq",
+        "faqs",
     }
 )
 
@@ -124,7 +128,7 @@ def classify_source(
     title_lower = title.lower()
     heading_lower = heading.lower()
     prominent_text = text[:3000].lower()
-    combined_strong = f"{path} {title_lower} {heading_lower}"
+    combined_strong = path
     aliases = [x.lower() for x in identity.aliases]
     alias_tokens = {_normalize_token(x) for x in aliases}
     preferred_tokens = {_normalize_token(x) for x in identity.preferred_path_tokens}
@@ -150,15 +154,6 @@ def classify_source(
         and scoped_token not in GENERIC_PATH_TOKENS
     ):
         conflicting.add(scoped_token)
-
-    title_site = _title_site_token(title_lower)
-    if (
-        title_site
-        and _normalize_token(title_site) not in preferred_tokens
-        and _normalize_token(title_site) not in alias_tokens
-        and title_site not in GENERIC_PATH_TOKENS
-    ):
-        conflicting.add(title_site)
 
     score = 0.0
     reasons: list[str] = []
@@ -194,30 +189,24 @@ def classify_source(
         score += 3
         reasons.append("topic words appear in the title or path (+3)")
 
-    organization_general = official and _looks_organization_general(
-        title_lower, heading_lower, prominent_text
-    )
-    target_evidence = (
-        target_path or title_alias or heading_alias or prominent_text_alias
-    )
-
     if conflicting:
         score -= 100
-        reasons.append("URL or title identifies a sibling/other site (-100)")
-        scope = "other_site"
-    elif target_evidence:
+        reasons.append("URL path identifies a sibling site (-100)")
+        scope = "sibling"
+    elif target_path:
         scope = "target_site"
-    elif organization_general:
+    elif official and _looks_organization_documentation_url(parsed):
         score += 1
-        reasons.append("page appears to be organization-wide documentation (+1)")
+        reasons.append("URL is organization documentation without site scope (+1)")
         scope = "organization_general"
     else:
         score -= 10
-        reasons.append("no target-site evidence appears in URL, title, or text (-10)")
+        reasons.append("URL has no deterministic target or organization scope (-10)")
         scope = "unrelated"
 
     return SourceClassification(
         site_scope=scope,
+        trust_level="official_web",
         matched_aliases=matched_aliases,
         conflicting_site_tokens=sorted(conflicting),
         score=score,
@@ -299,32 +288,24 @@ def _path_contains_token(path: str, token: str) -> bool:
 def _scoped_path_token(path: str) -> str | None:
     segments = [x for x in path.split("/") if x]
     for index, segment in enumerate(segments[:-1]):
-        if segment in PATH_SCOPE_MARKERS:
+        if segment in PATH_SCOPE_MARKERS and (segment != "hpc" or index == 0):
             return segments[index + 1]
     return None
-
-
-def _title_site_token(title: str) -> str | None:
-    match = re.search(r"\b([a-z0-9._-]+)\s+user\s+guide\b", title)
-    return match.group(1) if match else None
 
 
 def _topic_word_count(value: str) -> int:
     return sum(topic_matches(value, topic) for topic in TOPIC_TERMS)
 
 
-def _looks_organization_general(title: str, heading: str, text: str) -> bool:
-    combined = f"{title} {heading} {text[:1000]}"
-    phrases = (
-        "all clusters",
-        "all systems",
-        "organization-wide",
-        "hpc policy",
-        "slurm basics",
-        "cluster job submission",
-        "research computing",
+def _looks_organization_documentation_url(parsed: object) -> bool:
+    hostname = (getattr(parsed, "hostname", None) or "").lower()
+    path = (getattr(parsed, "path", None) or "").lower()
+    documentation_host = "docs." in hostname or "rcac." in hostname
+    documentation_path = any(
+        token in path.split("/")
+        for token in ("knowledge", "userguides", "workshops", "policies", "hpc")
     )
-    return any(phrase in combined for phrase in phrases)
+    return documentation_host and documentation_path
 
 
 def _prominently_identifies_target(text: str, aliases: list[str]) -> bool:

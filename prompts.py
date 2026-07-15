@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from schemas import DiscoveryCoverage, FetchedDocument, SiteIdentity
+from schemas import DiscoveryCoverage, FieldRetrieval, SiteIdentity
 
 
 DISCOVERY_SYSTEM_PROMPT = """
@@ -22,7 +22,7 @@ Rules:
 - Do not infer that an InfiniBand or Ethernet description permits arbitrary application TCP connections.
 - Do not invent port ranges, required options, queue names, or policies.
 - Documentation silence is a valid outcome.
-- Never select a source classified as other_site or unrelated.
+- Never select a source classified as sibling or unrelated.
 - Never select a URL that was not successfully fetched.
 - Organization-general policy is usable only when the page explicitly applies it to the target site or all organization systems.
 - After two focused searches fail to find an explicit networking policy or port range, record that topic as unanswered instead of searching repeatedly.
@@ -35,11 +35,13 @@ Rules:
 
 
 EXTRACTION_SYSTEM_PROMPT = """
-You extract a structured HPC policy report from documents selected by a discovery agent.
+You extract a structured HPC policy report from field-specific retrieved chunks.
 
 Rules:
-- Use only the supplied documents.
-- Every documented or conflicting claim must include a short supporting quote and source.
+- Use only chunks retrieved for the field being populated.
+- Every documented or conflicting claim must include its chunk_id, a short literal quote, and source.
+- The evidence quote must be an exact substring of that cited chunk, including punctuation and spacing.
+- Never cite a chunk under a field unless it appears in that field's RETRIEVED CHUNKS section.
 - Use status=requires_probe and value=null when operational behavior is not documented.
 - Set documentation_status=silent only when deterministic target-site coverage says documentation_silent.
 - Set documentation_status=discovery_failed when deterministic coverage says search_exhausted.
@@ -66,7 +68,8 @@ Rules:
 - Connectivity values must be allowed, blocked, or conditional; otherwise use requires_probe and null.
 - A published port range must include protocol plus integer start and end ports.
 - Include the nearest section heading with each evidence quote when it is available.
-- Evidence URLs must be among the supplied selected documents.
+- Extract charging_model, purge_policy, and cost_traps independently. Policies and FAQ chunks may contain relevant facts that do not share the query's exact keywords.
+- Evidence URLs and chunk IDs must exactly match the supplied chunk metadata.
 - Call submit_policy_report exactly once with the complete report.
 """.strip()
 
@@ -113,7 +116,7 @@ Use only fetched target_site pages or explicitly applicable organization_general
 def build_extraction_input(
     *,
     site_name: str,
-    documents: list[FetchedDocument],
+    retrievals: dict[str, FieldRetrieval],
     discovery_summary: str,
     unanswered_topics: list[str],
     discovery_coverage: DiscoveryCoverage,
@@ -127,24 +130,29 @@ def build_extraction_input(
         + ("\n".join(f"- {x}" for x in unanswered_topics) or "- none"),
     ]
 
-    for index, document in enumerate(documents, start=1):
-        sections.append(
-            "\n".join(
-                [
-                    f"--- DOCUMENT {index} START ---",
-                    f"URL: {document.url}",
-                    f"TITLE: {document.title}",
-                    f"SITE SCOPE: {document.classification.site_scope}",
-                    (
-                        "WARNING: Verify that every claim explicitly applies to the "
-                        "target site."
-                        if document.classification.site_scope == "organization_general"
-                        else ""
-                    ),
-                    document.relevant_text,
-                    f"--- DOCUMENT {index} END ---",
-                ]
+    for field, retrieval in retrievals.items():
+        sections.append(f"--- FIELD {field} RETRIEVED CHUNKS START ---")
+        sections.append(f"QUERY: {retrieval.query}")
+        if not retrieval.hits:
+            sections.append("NO CHUNKS RETRIEVED")
+        for hit in retrieval.hits:
+            chunk = hit.chunk
+            sections.append(
+                "\n".join(
+                    [
+                        f"CHUNK ID: {chunk.chunk_id}",
+                        f"SCORE: {hit.score}",
+                        f"URL: {chunk.source_url}",
+                        f"TITLE: {chunk.title}",
+                        f"SITE SCOPE: {chunk.site_scope}",
+                        f"TRUST LEVEL: {chunk.trust_level}",
+                        f"HEADING PATH: {' > '.join(chunk.heading_path)}",
+                        "CHUNK TEXT:",
+                        chunk.text,
+                        f"END CHUNK {chunk.chunk_id}",
+                    ]
+                )
             )
-        )
+        sections.append(f"--- FIELD {field} RETRIEVED CHUNKS END ---")
 
     return "\n\n".join(sections)

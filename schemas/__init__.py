@@ -10,6 +10,9 @@ from schemas.artifacts import (
     PolicyValidation,
     ReportEvidence,
     ReportFinding,
+    ReportFieldRetrieval,
+    ReportCorpus,
+    ReportRetrievedChunk,
     ReportRun,
     ReportSource,
     SchedulerProfile,
@@ -23,6 +26,7 @@ from schemas.discovery import (
     DiscoveryCoverage,
     DiscoverySelection,
     DocumentLink,
+    DocumentBlock,
     DocumentSection,
     FetchedDocument,
     FinishDiscoveryArgs,
@@ -31,6 +35,15 @@ from schemas.discovery import (
     TopicCoverage,
     TopicCoverageStatus,
     TopicName,
+    TrustLevel,
+)
+from schemas.corpus import (
+    ChunkerConfiguration,
+    CorpusChunk,
+    CorpusDocument,
+    CorpusManifest,
+    FieldRetrieval,
+    RetrievalHit,
 )
 from schemas.extraction import (
     ConnectivityFinding,

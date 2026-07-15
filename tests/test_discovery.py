@@ -40,7 +40,7 @@ def make_anvil_tools(*, page_budget=8):
     )
 
 
-def test_anvil_pages_outrank_and_bell_is_other_site():
+def test_anvil_pages_outrank_and_bell_is_sibling():
     tools = make_anvil_tools()
     tools.bootstrap_discovery(keywords=[])
 
@@ -52,7 +52,7 @@ def test_anvil_pages_outrank_and_bell_is_other_site():
     ]
 
     assert anvil.classification.site_scope == "target_site"
-    assert bell.classification.site_scope == "other_site"
+    assert bell.classification.site_scope == "sibling"
     assert anvil.classification.score > bell.classification.score
     assert "bell" in bell.classification.conflicting_site_tokens
 
@@ -239,7 +239,7 @@ def test_same_classifier_handles_stampede3_without_anvil_rules():
     )
 
     assert stampede.site_scope == "target_site"
-    assert frontera.site_scope == "other_site"
+    assert frontera.site_scope == "sibling"
     assert stampede.score > frontera.score
 
 
@@ -294,7 +294,7 @@ def test_stampede3_canonical_crawl_uses_same_pipeline():
     assert tools.discovery_coverage().submission_policy.status == "evidence_found"
     assert tools.candidates[
         "https://docs.tacc.utexas.edu/hpc/frontera/running/"
-    ].classification.site_scope == "other_site"
+    ].classification.site_scope == "sibling"
 
 
 def test_relevant_sections_survive_front_truncation():

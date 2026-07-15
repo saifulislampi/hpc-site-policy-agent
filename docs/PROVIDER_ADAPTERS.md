@@ -33,5 +33,5 @@ shared fake-provider contract tests
 ```
 
 Provider adapters must not contain site classification, source scoring, chunking,
-retrieval, profile conversion, or artifact-writing logic. Adding temporary RAG
-later therefore changes the shared pipeline once, not three adapters.
+retrieval, profile conversion, or artifact-writing logic. The persistent corpus
+and transient retrieval pipeline is shared by every future adapter.

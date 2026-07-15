@@ -14,9 +14,12 @@ It contains:
 
 - provider, model, run ID, and timestamp;
 - canonical root, every query, coverage, and termination reason;
-- stable source IDs for selected and rejected candidates;
+- stable source IDs with independent scope, trust, selected, and retrieved state;
+- corpus ID/fingerprint and field-specific retrieved chunk scores;
 - flattened findings with status, documentation status, confidence, and quoted
-  evidence referencing source IDs;
+  evidence referencing source IDs and exact chunk IDs;
+- retrieved-but-uncited chunks, so abstention can be distinguished from a
+  retrieval miss;
 - unresolved questions and request/token statistics.
 
 This file may change within the `0.1` research schema as evaluation needs grow.
@@ -36,7 +39,8 @@ It contains only values Floability can consume or a profiler can validate:
 - normalized network values;
 - explicit null storage placeholders;
 - section-level validation state.
-- a small provenance block containing the discovery-report path, run ID, and
+- a small provenance block containing the discovery-report path, run ID, corpus
+  ID/fingerprint, and
   JSON Pointer references from policy values to detailed findings.
 
 Detailed field status, evidence, source IDs, and unresolved questions remain
@@ -49,6 +53,8 @@ Example:
   "provenance": {
     "discovery_report": "purdue-anvil-20260715-190000.discovery-report.json",
     "run_id": "uuid",
+    "corpus_id": "purdue-anvil",
+    "corpus_fingerprint": "sha256:...",
     "references": {
       "/submission/options": "/findings/submission.options"
     }
@@ -67,6 +73,7 @@ Example:
 - Keep partition choices in `partitions.limits`; do not duplicate them in an
   option-level allowed-values field.
 - A field requiring a probe has a null site-policy value.
-- Sibling-site pages may appear only as rejected detailed-report sources.
+- Sibling-site pages may be retained in the corpus and detailed report, but are
+  excluded by the retrieval scope parameter and can never be cited.
 - Increment `schema_version` when a consumer-facing field is removed, renamed,
   or changes type.

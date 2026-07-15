@@ -21,6 +21,7 @@ class StrictModel(BaseModel):
 
 
 class Evidence(StrictModel):
+    chunk_id: str = Field(min_length=1, max_length=100)
     source_url: HttpUrl
     source_title: str = Field(min_length=1, max_length=500)
     heading: str | None = Field(max_length=500)
@@ -132,7 +133,9 @@ class SlurmPolicy(StrictModel):
     walltime_policy: StringFinding
     memory_policy: StringFinding
     job_size_policy: StringFinding
-    charging_policy: StringFinding
+    charging_model: StringFinding
+    purge_policy: StringFinding
+    cost_traps: StringFinding
 
 
 class NetworkPolicy(StrictModel):

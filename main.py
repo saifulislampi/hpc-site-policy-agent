@@ -95,6 +95,27 @@ def parse_args() -> argparse.Namespace:
         help="Maximum uncached page-fetch requests; default 8.",
     )
     parser.add_argument("--max-page-chars", type=int, default=20_000)
+    parser.add_argument(
+        "--corpus-dir",
+        help="Persistent canonical corpus directory; defaults to corpora/<site-id>.",
+    )
+    parser.add_argument(
+        "--refresh-corpus",
+        action="store_true",
+        help="Replace changed rediscovered pages; pages not rediscovered are retained.",
+    )
+    parser.add_argument(
+        "--chunk-chars",
+        type=int,
+        default=1800,
+        help="Maximum ordinary text chunk size; tables and policy/FAQ sections stay whole.",
+    )
+    parser.add_argument(
+        "--retrieval-top-k",
+        type=int,
+        default=5,
+        help="Maximum chunks retrieved per ordinary policy field.",
+    )
     parser.add_argument("--log-dir", default="logs")
     parser.add_argument(
         "--output-dir",
@@ -170,6 +191,10 @@ def main() -> int:
             raise ValueError("--api-timeout must be greater than zero.")
         if args.api_max_retries < 0:
             raise ValueError("--api-max-retries cannot be negative.")
+        if args.chunk_chars < 200:
+            raise ValueError("--chunk-chars must be at least 200.")
+        if args.retrieval_top_k < 1:
+            raise ValueError("--retrieval-top-k must be at least 1.")
         provider = build_provider(
             args.provider,
             args.model,
@@ -191,13 +216,17 @@ def main() -> int:
             search_budget=args.search_budget,
             page_budget=args.page_budget,
         )
+        site_id = slugify(args.site)
         agent = HPCPolicyScoutAgent(
             provider=provider,
             tools=tools,
             max_steps=args.max_steps,
             log_dir=args.log_dir,
+            corpus_dir=args.corpus_dir or Path("corpora") / site_id,
+            refresh_corpus=args.refresh_corpus,
+            chunk_chars=args.chunk_chars,
+            retrieval_top_k=args.retrieval_top_k,
         )
-        site_id = slugify(args.site)
         discovery_output, site_policy_output = resolve_output_paths(
             args,
             site_id=site_id,

@@ -52,6 +52,7 @@ def test_inferred_evidence_cannot_establish_definitive_policy():
             explanation="An inferred range is not definitive evidence.",
             evidence=[
                 {
+                    "chunk_id": "C_architecture",
                     "source_url": "https://docs.example.edu/site/architecture/",
                     "source_title": "Architecture",
                     "heading": "Network Architecture",

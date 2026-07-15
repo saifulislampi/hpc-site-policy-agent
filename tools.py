@@ -30,6 +30,7 @@ from schemas import (
     CandidateSource,
     DiscoveryCoverage,
     DiscoverySelection,
+    DocumentBlock,
     DocumentLink,
     DocumentSection,
     FetchedDocument,
@@ -200,6 +201,8 @@ class ScoutTools:
             if topic is not None:
                 self._fetch_best_topic_candidate(topic)
 
+        self._fetch_sibling_control()
+
         coverage = self.discovery_coverage()
         context = {
             "canonical_root": self.canonical_root,
@@ -229,7 +232,7 @@ class ScoutTools:
                     "reason": item.rejection_reason,
                 }
                 for item in self._ranked_candidates(eligible_only=False)
-                if item.classification.site_scope in {"other_site", "unrelated"}
+                if item.classification.site_scope in {"sibling", "unrelated"}
             ][:10],
         }
         self._emit("coverage", coverage.model_dump(mode="json"))
@@ -277,6 +280,25 @@ class ScoutTools:
                 )
             documents.append(document)
         return documents
+
+    def corpus_documents(self) -> list[FetchedDocument]:
+        """Return eligible web pages plus retained sibling negative controls."""
+
+        eligible = [
+            document
+            for document in self.documents.values()
+            if document.classification.site_scope == "target_site"
+            or (
+                document.classification.site_scope == "organization_general"
+                and self._organization_page_applies(document)
+            )
+        ]
+        siblings = [
+            document
+            for document in self.rejected_documents.values()
+            if document.classification.site_scope == "sibling"
+        ]
+        return [*eligible, *siblings]
 
     def discovery_coverage(self) -> DiscoveryCoverage:
         return DiscoveryCoverage(
@@ -435,7 +457,7 @@ class ScoutTools:
                 "rejection_reason": item.rejection_reason,
             }
             for item in current
-            if item.classification.site_scope in {"other_site", "unrelated"}
+            if item.classification.site_scope in {"sibling", "unrelated"}
         ]
         return {
             "ok": True,
@@ -464,7 +486,7 @@ class ScoutTools:
             )
             self._upsert_candidate(preliminary)
 
-        if preliminary.classification.site_scope in {"other_site", "unrelated"}:
+        if preliminary.classification.site_scope == "unrelated":
             return {
                 "ok": False,
                 "rejected": True,
@@ -503,7 +525,13 @@ class ScoutTools:
             title = final_url.rsplit("/", 1)[-1]
             links: list[DocumentLink] = []
             sections = [
-                DocumentSection(heading=title, text=full_text, links=[])
+                DocumentSection(
+                    heading=title,
+                    heading_path=[title],
+                    text=full_text,
+                    links=[],
+                    blocks=[DocumentBlock(kind="text", text=full_text)],
+                )
             ]
             main_heading = title
         else:
@@ -560,7 +588,7 @@ class ScoutTools:
             rejection_reason=rejection_reason,
         )
         self._upsert_candidate(candidate)
-        if classification.site_scope in {"other_site", "unrelated"}:
+        if classification.site_scope in {"sibling", "unrelated"}:
             self.rejected_documents[final_url] = document
             self._emit(
                 "source_rejected",
@@ -777,6 +805,37 @@ class ScoutTools:
         candidate = max(candidates, key=lambda item: self._candidate_rank(item, topic))
         self._fetch_page({"url": str(candidate.url)})
 
+    def _fetch_sibling_control(self) -> None:
+        """Retain one sibling page so retrieval exclusion is measurable."""
+
+        if self._pages_used >= self.page_budget:
+            return
+        candidates = [
+            item
+            for item in self.candidates.values()
+            if item.classification.site_scope == "sibling"
+            and str(item.url) not in self.rejected_documents
+            and topic_matches(
+                f"{item.title} {item.snippet} {urlparse(str(item.url)).path}",
+                "submission_policy",
+            )
+        ]
+        if not candidates:
+            return
+        candidate = max(
+            candidates,
+            key=lambda item: self._candidate_rank(item, "submission_policy"),
+        )
+        self._emit("sibling_control_fetch", {"url": str(candidate.url)})
+        try:
+            self._fetch_page({"url": str(candidate.url)})
+        except KeyError:
+            # Small mocked backends may intentionally omit negative-control pages.
+            self._emit(
+                "page_fetch_failed",
+                {"url": str(candidate.url), "error": "mock page unavailable"},
+            )
+
     def _record_page_coverage(self, document: FetchedDocument) -> None:
         if document.classification.site_scope != "target_site":
             return
@@ -980,17 +1039,28 @@ class ScoutTools:
         )
         sections: list[DocumentSection] = []
         heading = "Overview"
-        text_parts: list[str] = []
+        heading_path = [heading]
+        heading_stack: list[str] = []
+        blocks: list[DocumentBlock] = []
         links: list[str] = []
 
         def flush() -> None:
-            text = "\n".join(dict.fromkeys(x for x in text_parts if x)).strip()
+            unique_blocks: list[DocumentBlock] = []
+            seen_blocks: set[tuple[str, str]] = set()
+            for block in blocks:
+                key = (block.kind, block.text)
+                if block.text and key not in seen_blocks:
+                    seen_blocks.add(key)
+                    unique_blocks.append(block)
+            text = "\n\n".join(block.text for block in unique_blocks).strip()
             if text:
                 sections.append(
                     DocumentSection(
                         heading=heading[:500],
-                        text=text[:8000],
+                        heading_path=[item[:500] for item in heading_path],
+                        text=text,
                         links=list(dict.fromkeys(links))[:50],
+                        blocks=unique_blocks,
                     )
                 )
 
@@ -998,12 +1068,30 @@ class ScoutTools:
             if element.name in {"h1", "h2", "h3", "h4"}:
                 flush()
                 heading = element.get_text(" ", strip=True) or "Untitled section"
-                text_parts = []
+                level = int(element.name[1])
+                heading_stack = heading_stack[: level - 1]
+                while len(heading_stack) < level - 1:
+                    heading_stack.append("Untitled section")
+                heading_stack.append(heading)
+                heading_path = list(heading_stack)
+                blocks = []
                 links = []
                 continue
-            text = element.get_text(" ", strip=True)
+            if element.name != "table" and element.find_parent("table") is not None:
+                continue
+            if element.name != "pre" and element.find_parent("pre") is not None:
+                continue
+            if element.name == "table":
+                text = self._table_to_markdown(element)
+                kind = "table"
+            elif element.name == "pre":
+                text = element.get_text("\n", strip=True)
+                kind = "code"
+            else:
+                text = element.get_text(" ", strip=True)
+                kind = "text"
             if text:
-                text_parts.append(text)
+                blocks.append(DocumentBlock(kind=kind, text=text))
             for anchor in element.find_all("a", href=True):
                 try:
                     links.append(self._validate_url(urljoin(base_url, anchor["href"])))
@@ -1011,6 +1099,29 @@ class ScoutTools:
                     continue
         flush()
         return sections
+
+    @staticmethod
+    def _table_to_markdown(table: Any) -> str:
+        rows: list[list[str]] = []
+        for row in table.find_all("tr"):
+            cells = [
+                cell.get_text(" ", strip=True).replace("|", "\\|")
+                for cell in row.find_all(["th", "td"], recursive=False)
+            ]
+            if cells:
+                rows.append(cells)
+        if not rows:
+            return ""
+        width = max(len(row) for row in rows)
+        normalized = [row + [""] * (width - len(row)) for row in rows]
+        header = normalized[0]
+        body = normalized[1:]
+        lines = [
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join("---" for _ in range(width)) + " |",
+        ]
+        lines.extend("| " + " | ".join(row) + " |" for row in body)
+        return "\n".join(lines)
 
     def _extract_links(self, soup: BeautifulSoup, base_url: str) -> list[DocumentLink]:
         links: list[DocumentLink] = []
@@ -1079,7 +1190,7 @@ class ScoutTools:
 
     @staticmethod
     def _rejection_reason(scope: str) -> str | None:
-        if scope == "other_site":
+        if scope == "sibling":
             return "Sibling or other-site documentation cannot establish target policy."
         if scope == "unrelated":
             return "No target-site or organization-wide policy evidence."
