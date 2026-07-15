@@ -64,8 +64,7 @@ class HPCPolicyScoutAgent:
         *,
         site_name: str,
         site_id: str,
-        organization: str | None,
-        discovery_report_filename: str,
+        discovery_report_reference: str,
         keywords: list[str],
         allowed_domains: list[str],
     ) -> RunArtifacts:
@@ -130,8 +129,7 @@ class HPCPolicyScoutAgent:
             model=getattr(self.provider, "model", "unknown"),
             timestamp=run_timestamp,
             site_id=site_id,
-            organization=organization,
-            discovery_report_filename=discovery_report_filename,
+            discovery_report_reference=discovery_report_reference,
             termination_reason=selection.termination_reason,
             metrics=metrics,
         )

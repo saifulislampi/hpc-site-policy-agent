@@ -39,13 +39,15 @@ CLI arguments + environment
        → flattened findings + evidence
        → request and discovery statistics
   → build compact candidate site policy
-       → actual profile values
-       → field status + source IDs
-       → validation summary
-       → required probes
-       → discovery-report provenance
-  → write outputs/<site>.discovery-report.json (or --output-dir)
-  → write outputs/<site>.site-policy.json (or --output-dir)
+       → scheduler type + submit command
+       → every documented submission option + exact syntax + required boolean
+       → partition defaults + limits
+       → network values + null storage placeholders
+       → section-level validation state
+       → JSON Pointer references to detailed findings
+       → no evidence duplication
+  → write outputs/<site>-<timestamp>.discovery-report.json (or explicit path)
+  → write outputs/<site>-<timestamp>.site-policy.json (or explicit path)
   → write logs/<run-id>.jsonl (or --log-dir)
   → keep full candidate rankings in the report and JSONL trace, not terminal output
   → discard in-memory run state when the process exits

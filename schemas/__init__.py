@@ -3,20 +3,19 @@
 from schemas.artifacts import (
     ArtifactCoverage,
     DiscoveryReport,
-    FieldStatus,
     NetworkProfile,
     PartitionProfile,
-    ProfileValidation,
-    Provenance,
+    PartitionsProfile,
+    PolicyProvenance,
+    PolicyValidation,
     ReportEvidence,
     ReportFinding,
     ReportRun,
     ReportSource,
-    RequiredProbe,
     SchedulerProfile,
     SiteDescriptor,
     SitePolicyArtifact,
-    SiteProfileValues,
+    StorageProfile,
     SubmissionProfile,
 )
 from schemas.discovery import (
@@ -34,7 +33,6 @@ from schemas.discovery import (
     TopicName,
 )
 from schemas.extraction import (
-    BoolFinding,
     ConnectivityFinding,
     ConnectivityValue,
     DocumentationStatus,
@@ -50,7 +48,8 @@ from schemas.extraction import (
     PortRangeFinding,
     SlurmPolicy,
     StringFinding,
-    StringListFinding,
+    SubmissionOption,
+    SubmissionOptionsFinding,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]

@@ -50,8 +50,18 @@ Rules:
 - Preserve disagreements between official pages as status=conflicting.
 - A definitive documented value needs direct evidence; inferred evidence cannot establish site policy.
 - Normalize scheduler values to a lowercase identifier such as slurm only when documented.
-- Normalize required_submission_options to semantic names such as account or partition, not example values.
-- Set account_required and default_partition only when directly documented for the target site.
+- Extract the documented submission command, such as sbatch, without assuming it from scheduler type.
+- List every submission option explicitly shown in target-site documentation, not only required options.
+- Give each option a stable semantic name and every documented site-specific syntax form.
+- Use a syntax list, for example ["-A {account}", "--account={account}"].
+- Set required=true only when the documentation explicitly says that specific option is required, mandatory, or part of the minimum submission fields.
+- Set required=false when an option is merely present in an example or described without explicit mandatory wording.
+- Never treat every line in an example job script as required.
+- Preserve a documented example separately from value. An example account is not the user's account value.
+- Set value only for an explicitly documented site-wide default or fixed value; otherwise use null.
+- Do not duplicate partition choices inside submission options; partition names belong in the partitions finding.
+- Do not add standard Slurm options or syntax that are absent from the selected documents.
+- Set default_partition only when directly documented for the target site.
 - Represent each documented partition with its name and only explicitly stated limits.
 - Connectivity values must be allowed, blocked, or conditional; otherwise use requires_probe and null.
 - A published port range must include protocol plus integer start and end ports.

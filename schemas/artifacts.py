@@ -14,6 +14,7 @@ from schemas.extraction import (
     EvidenceInterpretation,
     FindingStatus,
     PortRange,
+    SubmissionOption,
 )
 
 
@@ -93,17 +94,15 @@ class DiscoveryReport(StrictModel):
 class SiteDescriptor(StrictModel):
     id: str
     name: str
-    organization: str | None
 
 
 class SchedulerProfile(StrictModel):
     type: str | None
+    submit_command: str | None
 
 
 class SubmissionProfile(StrictModel):
-    required_options: list[str] | None
-    default_partition: str | None
-    account_required: bool | None
+    options: list[SubmissionOption]
 
 
 class PartitionProfile(StrictModel):
@@ -112,49 +111,53 @@ class PartitionProfile(StrictModel):
     shared_nodes: bool | None
 
 
+class PartitionsProfile(StrictModel):
+    default: str | None
+    limits: dict[str, PartitionProfile]
+
+
 class NetworkProfile(StrictModel):
     manager_worker: ConnectivityValue | None
     worker_worker: ConnectivityValue | None
-    published_port_range: list[PortRange] | None
+    port_range: list[PortRange] | None
+    manager_address: str | None
     outbound_compute: ConnectivityValue | None
 
 
-class SiteProfileValues(StrictModel):
-    scheduler: SchedulerProfile
-    submission: SubmissionProfile
-    partitions: dict[str, PartitionProfile]
-    network: NetworkProfile
+class StorageProfile(StrictModel):
+    shared_filesystem: str | None
+    scratch_directory: str | None
+    temporary_directory: str | None
+    symlink_supported: bool | None
+    hardlink_supported: bool | None
 
 
-class FieldStatus(StrictModel):
-    status: FindingStatus
-    documentation_status: DocumentationStatus
-    source_ids: list[str] = Field(default_factory=list)
+ProfileSectionStatus = Literal[
+    "documented", "partial", "probe_required", "conflicting", "not_applicable"
+]
 
 
-class ProfileValidation(StrictModel):
-    state: Literal["complete", "partial", "conflicting"]
-    documented_fields: int = Field(ge=0)
-    probe_required_fields: int = Field(ge=0)
-    conflicting_fields: int = Field(ge=0)
+class PolicyValidation(StrictModel):
+    scheduler: ProfileSectionStatus
+    submission: ProfileSectionStatus
+    partitions: ProfileSectionStatus
+    network: ProfileSectionStatus
+    storage: ProfileSectionStatus
 
 
-class RequiredProbe(StrictModel):
-    probe: str
-    target_field: str
-
-
-class Provenance(StrictModel):
-    report: str
+class PolicyProvenance(StrictModel):
+    discovery_report: str
     run_id: str
+    references: dict[str, str]
 
 
 class SitePolicyArtifact(StrictModel):
     schema_version: Literal["0.1"] = "0.1"
-    profile_state: Literal["candidate", "validated"] = "candidate"
     site: SiteDescriptor
-    profile: SiteProfileValues
-    field_status: dict[str, FieldStatus]
-    validation: ProfileValidation
-    required_probes: list[RequiredProbe]
-    provenance: Provenance
+    scheduler: SchedulerProfile
+    submission: SubmissionProfile
+    partitions: PartitionsProfile
+    network: NetworkProfile
+    storage: StorageProfile
+    validation: PolicyValidation
+    provenance: PolicyProvenance

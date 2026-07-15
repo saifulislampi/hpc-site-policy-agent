@@ -88,8 +88,32 @@ def make_extracted_policy(tools):
             "discovery_coverage": tools.discovery_coverage().model_dump(mode="json"),
             "slurm_policy": {
                 "scheduler": documented("slurm"),
-                "required_submission_options": documented(["account", "partition"]),
-                "account_required": documented(True),
+                "submit_command": documented("sbatch"),
+                "submission_options": documented(
+                    [
+                        {
+                            "name": "account",
+                            "syntax": ["-A {account}", "--account={account}"],
+                            "required": True,
+                            "example": "-A cis250350",
+                            "value": None,
+                        },
+                        {
+                            "name": "partition",
+                            "syntax": ["-p {partition}", "--partition={partition}"],
+                            "required": True,
+                            "example": "-p shared",
+                            "value": "shared",
+                        },
+                        {
+                            "name": "memory",
+                            "syntax": ["--mem={memory}"],
+                            "required": False,
+                            "example": "--mem=8G",
+                            "value": None,
+                        },
+                    ]
+                ),
                 "account_allocation_policy": documented("Use the allocation account."),
                 "default_partition": documented("shared"),
                 "partitions": documented(
@@ -147,8 +171,9 @@ def test_builds_detailed_and_compact_artifacts():
         model="gpt-5-mini",
         timestamp=datetime(2026, 7, 15, 19, 0, tzinfo=timezone.utc),
         site_id="purdue-anvil",
-        organization="Purdue RCAC",
-        discovery_report_filename="purdue-anvil.discovery-report.json",
+        discovery_report_reference=(
+            "purdue-anvil-20260715-190000.discovery-report.json"
+        ),
         termination_reason=result["selection"]["termination_reason"],
         metrics={
             **tools.discovery_metrics(),
@@ -170,24 +195,27 @@ def test_builds_detailed_and_compact_artifacts():
     assert jobs_source.selected is True
     assert bell_sources
     assert all(source.selected is False for source in bell_sources)
-    assert report.findings["submission.required_options"].evidence[0].source_id == (
+    assert report.findings["submission.options"].evidence[0].source_id == (
         jobs_source.id
     )
 
-    assert policy.profile_state == "candidate"
     assert policy.site.id == "purdue-anvil"
-    assert policy.profile.scheduler.type == "slurm"
-    assert policy.profile.submission.required_options == ["account", "partition"]
-    assert policy.profile.partitions["wholenode"].maximum_nodes == 16
-    assert policy.profile.network.manager_worker is None
-    assert policy.field_status["/profile/network/manager_worker"].status == (
-        "requires_probe"
+    assert policy.scheduler.type == "slurm"
+    assert policy.scheduler.submit_command == "sbatch"
+    assert policy.submission.options[0].syntax == [
+        "-A {account}",
+        "--account={account}",
+    ]
+    assert policy.submission.options[0].example == "-A cis250350"
+    assert policy.submission.options[0].value is None
+    assert policy.partitions.limits["wholenode"].maximum_nodes == 16
+    assert policy.network.manager_worker is None
+    assert policy.storage.scratch_directory is None
+    assert policy.validation.network == "probe_required"
+    assert policy.provenance.run_id == "run-123"
+    assert policy.provenance.references["/submission/options"] == (
+        "/findings/submission.options"
     )
-    assert any(
-        probe.probe == "manager_worker_connectivity"
-        for probe in policy.required_probes
-    )
-    assert policy.provenance.report == "purdue-anvil.discovery-report.json"
 
 
 def test_compact_policy_separates_values_status_and_probes():
@@ -208,22 +236,18 @@ def test_compact_policy_separates_values_status_and_probes():
         model="test-model",
         timestamp=datetime.now(timezone.utc),
         site_id="purdue-anvil",
-        organization=None,
-        discovery_report_filename="purdue-anvil.discovery-report.json",
+        discovery_report_reference="purdue-anvil.discovery-report.json",
         termination_reason="test",
         metrics=tools.discovery_metrics(),
     )
     dumped = artifacts.site_policy.model_dump(mode="json")
 
-    assert "evidence" not in dumped["profile"]
-    assert dumped["profile"]["network"]["published_port_range"] is None
-    assert dumped["field_status"]["/profile/network/published_port_range"]["status"] == (
-        "requires_probe"
-    )
-    assert any(
-        item["target_field"] == "/profile/network/published_port_range"
-        for item in dumped["required_probes"]
-    )
+    assert "findings" not in dumped
+    assert "evidence" not in dumped
+    assert dumped["network"]["port_range"] is None
+    assert dumped["storage"]["shared_filesystem"] is None
+    assert dumped["validation"]["network"] == "probe_required"
+    assert dumped["submission"]["options"][0]["syntax"][0] == "-A {account}"
 
 
 def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
@@ -238,15 +262,14 @@ def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
     artifacts = agent.run(
         site_name="Purdue Anvil",
         site_id="purdue-anvil",
-        organization="Purdue RCAC",
-        discovery_report_filename="purdue-anvil.discovery-report.json",
+        discovery_report_reference="purdue-anvil.discovery-report.json",
         keywords=["Anvil Slurm", "Anvil networking"],
         allowed_domains=["purdue.edu"],
     )
     progress = capsys.readouterr().err
 
     assert artifacts.discovery_report.run.model == "mock-model"
-    assert artifacts.site_policy.site.organization == "Purdue RCAC"
+    assert artifacts.site_policy.scheduler.submit_command == "sbatch"
     assert "Search 1/8" in progress
     assert "Waiting for the discovery model" in progress
     assert "Extracting policy report" in progress

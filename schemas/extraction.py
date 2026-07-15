@@ -13,6 +13,7 @@ FindingStatus = Literal["documented", "conflicting", "requires_probe", "not_appl
 EvidenceInterpretation = Literal["direct", "inferred", "conflicting", "silent"]
 DocumentationStatus = Literal["documented", "silent", "discovery_failed", "not_applicable"]
 ConnectivityValue = Literal["allowed", "blocked", "conditional"]
+OptionValue = str | int | float | bool
 
 
 class StrictModel(BaseModel):
@@ -71,14 +72,6 @@ class StringFinding(FindingBase):
     value: str | None
 
 
-class StringListFinding(FindingBase):
-    value: list[str] | None
-
-
-class BoolFinding(FindingBase):
-    value: bool | None
-
-
 class ConnectivityFinding(FindingBase):
     value: ConnectivityValue | None
 
@@ -110,6 +103,18 @@ class PortRangeFinding(FindingBase):
     value: list[PortRange] | None
 
 
+class SubmissionOption(StrictModel):
+    name: str = Field(min_length=1, max_length=100)
+    syntax: list[str] = Field(min_length=1)
+    required: bool
+    example: str | None = Field(max_length=500)
+    value: OptionValue | None
+
+
+class SubmissionOptionsFinding(FindingBase):
+    value: list[SubmissionOption] | None
+
+
 class DocumentSource(StrictModel):
     url: HttpUrl
     title: str = Field(min_length=1, max_length=500)
@@ -119,8 +124,8 @@ class DocumentSource(StrictModel):
 
 class SlurmPolicy(StrictModel):
     scheduler: StringFinding
-    required_submission_options: StringListFinding
-    account_required: BoolFinding
+    submit_command: StringFinding
+    submission_options: SubmissionOptionsFinding
     account_allocation_policy: StringFinding
     default_partition: StringFinding
     partitions: PartitionListFinding

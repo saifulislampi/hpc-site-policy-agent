@@ -45,7 +45,6 @@ python main.py \
   --keyword "Anvil RCAC Slurm job submission account partition" \
   --keyword "Anvil compute node login node networking TCP ports" \
   --allowed-domain purdue.edu \
-  --organization "Purdue RCAC" \
   --provider openai \
   --model gpt-5-mini \
   --max-steps 2
@@ -67,7 +66,6 @@ Useful options:
 
 ```text
 --model MODEL            Provider model identifier
---organization NAME      Organization stored in the candidate profile
 --api-timeout SECONDS    Per-model-request timeout; default 90
 --api-max-retries N      Transient model-request retries; default 0
 --max-steps N            Maximum discovery-agent turns; default 10
@@ -106,19 +104,25 @@ python main.py \
 
 Each run creates:
 
-- `outputs/<site-id>.discovery-report.json`: the detailed research artifact containing
+- `outputs/<site-id>-<timestamp>.discovery-report.json`: the detailed research artifact containing
   run metadata, all selected/rejected source provenance, flattened findings,
   evidence, coverage, and statistics.
-- `outputs/<site-id>.site-policy.json`: the small candidate operational profile with
-  normalized values, separate field status, required probes, and provenance.
+- `outputs/<site-id>-<timestamp>.site-policy.json`: the small candidate operational profile with
+  normalized scheduler values, every documented submission option with exact
+  syntax, partition limits, network values, storage placeholders, and
+  section-level validation state. Evidence and source metadata remain in the
+  discovery report; the policy stores only its run ID, report path, and JSON
+  Pointer links to detailed findings.
 - A JSONL execution trace recording canonical-root selection, generated and repaired queries, candidate rankings, classifications, followed links, selected/rejected pages, request counts, token usage, and termination reason.
 
 Use `--output-dir` to place both JSON artifacts elsewhere. Explicit
 `--discovery-output` and `--site-policy-output` paths override that directory.
+The default timestamp format is `YYYYMMDD-HHMMSS`, and both artifacts from a run
+receive the same timestamp.
 
 The CLI also prints concise, timestamped progress to stderr. Long model calls are announced before waiting and are bounded by `--api-timeout`; detailed diagnostics remain in the JSONL trace.
 
-Only fetched `target_site` pages and explicitly applicable `organization_general` pages can reach extraction. A page for another cluster may appear in the debug table as a rejected candidate, but it cannot be selected or cited.
+Only fetched `target_site` pages and explicitly applicable `organization_general` pages can reach extraction. A page for another cluster may appear as a rejected discovery-report source, but it cannot be selected or cited.
 
 Run tests with:
 

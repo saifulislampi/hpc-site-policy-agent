@@ -4,35 +4,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from schemas import (
     ArtifactCoverage,
     DiscoveryReport,
     ExtractedPolicy,
-    FieldStatus,
     NetworkProfile,
     PartitionProfile,
-    ProfileValidation,
-    Provenance,
+    PartitionsProfile,
+    PolicyProvenance,
+    PolicyValidation,
     ReportEvidence,
     ReportFinding,
     ReportRun,
     ReportSource,
-    RequiredProbe,
     SchedulerProfile,
     SiteDescriptor,
     SitePolicyArtifact,
-    SiteProfileValues,
+    StorageProfile,
     SubmissionProfile,
 )
 
 
 FINDING_PATHS = {
     "scheduler": "scheduler.type",
-    "required_submission_options": "submission.required_options",
-    "account_required": "submission.account_required",
+    "submit_command": "scheduler.submit_command",
+    "submission_options": "submission.options",
     "account_allocation_policy": "submission.account_allocation_policy",
     "default_partition": "submission.default_partition",
     "partitions": "submission.partitions",
@@ -64,8 +62,7 @@ def build_run_artifacts(
     model: str,
     timestamp: datetime,
     site_id: str,
-    organization: str | None,
-    discovery_report_filename: str,
+    discovery_report_reference: str,
     termination_reason: str,
     metrics: dict[str, Any],
 ) -> RunArtifacts:
@@ -106,10 +103,8 @@ def build_run_artifacts(
     )
     site_policy = _build_site_policy(
         extracted=extracted,
-        source_ids=source_ids,
         site_id=site_id,
-        organization=organization,
-        report_filename=Path(discovery_report_filename).name,
+        discovery_report_reference=discovery_report_reference,
         run_id=run_id,
     )
     return RunArtifacts(discovery_report=discovery_report, site_policy=site_policy)
@@ -175,10 +170,8 @@ def _build_findings(
 def _build_site_policy(
     *,
     extracted: ExtractedPolicy,
-    source_ids: dict[str, str],
     site_id: str,
-    organization: str | None,
-    report_filename: str,
+    discovery_report_reference: str,
     run_id: str,
 ) -> SitePolicyArtifact:
     slurm = extracted.slurm_policy
@@ -192,78 +185,71 @@ def _build_site_policy(
         for item in (_documented_value(slurm.partitions) or [])
     }
 
-    normalized_findings = {
-        "/profile/scheduler/type": slurm.scheduler,
-        "/profile/submission/required_options": slurm.required_submission_options,
-        "/profile/submission/default_partition": slurm.default_partition,
-        "/profile/submission/account_required": slurm.account_required,
-        "/profile/partitions": slurm.partitions,
-        "/profile/network/manager_worker": network.manager_worker_connectivity,
-        "/profile/network/worker_worker": network.worker_worker_connectivity,
-        "/profile/network/published_port_range": network.published_port_range,
-        "/profile/network/outbound_compute": network.outbound_compute_network,
-    }
-    field_status = {
-        path: FieldStatus(
-            status=finding.status,
-            documentation_status=finding.documentation_status,
-            source_ids=list(
-                dict.fromkeys(source_ids[str(item.source_url)] for item in finding.evidence)
-            ),
-        )
-        for path, finding in normalized_findings.items()
-    }
-    probe_names = {
-        "/profile/scheduler/type": "scheduler_type",
-        "/profile/submission/required_options": "required_submission_options",
-        "/profile/submission/default_partition": "default_partition",
-        "/profile/submission/account_required": "account_requirement",
-        "/profile/partitions": "partition_configuration",
-        "/profile/network/manager_worker": "manager_worker_connectivity",
-        "/profile/network/worker_worker": "worker_worker_connectivity",
-        "/profile/network/published_port_range": "tcp_port_range",
-        "/profile/network/outbound_compute": "outbound_compute_network",
-    }
-    required_probes = [
-        RequiredProbe(probe=probe_names[path], target_field=path)
-        for path, finding in normalized_findings.items()
-        if finding.status == "requires_probe"
-    ]
-    documented = sum(item.status == "documented" for item in field_status.values())
-    probes = sum(item.status == "requires_probe" for item in field_status.values())
-    conflicts = sum(item.status == "conflicting" for item in field_status.values())
-    state = "conflicting" if conflicts else "partial" if probes else "complete"
-
     return SitePolicyArtifact(
         site=SiteDescriptor(
             id=site_id,
             name=extracted.site_name,
-            organization=organization,
         ),
-        profile=SiteProfileValues(
-            scheduler=SchedulerProfile(type=_documented_value(slurm.scheduler)),
-            submission=SubmissionProfile(
-                required_options=_documented_value(slurm.required_submission_options),
-                default_partition=_documented_value(slurm.default_partition),
-                account_required=_documented_value(slurm.account_required),
+        scheduler=SchedulerProfile(
+            type=_documented_value(slurm.scheduler),
+            submit_command=_documented_value(slurm.submit_command),
+        ),
+        submission=SubmissionProfile(
+            options=_documented_value(slurm.submission_options) or [],
+        ),
+        partitions=PartitionsProfile(
+            default=_documented_value(slurm.default_partition),
+            limits=partitions,
+        ),
+        network=NetworkProfile(
+            manager_worker=_documented_value(network.manager_worker_connectivity),
+            worker_worker=_documented_value(network.worker_worker_connectivity),
+            port_range=_documented_value(network.published_port_range),
+            manager_address=_documented_value(network.manager_address_guidance),
+            outbound_compute=_documented_value(network.outbound_compute_network),
+        ),
+        storage=StorageProfile(
+            shared_filesystem=None,
+            scratch_directory=None,
+            temporary_directory=None,
+            symlink_supported=None,
+            hardlink_supported=None,
+        ),
+        validation=PolicyValidation(
+            scheduler=_section_status([slurm.scheduler, slurm.submit_command]),
+            submission=_section_status(
+                [slurm.submission_options, slurm.account_allocation_policy]
             ),
-            partitions=partitions,
-            network=NetworkProfile(
-                manager_worker=_documented_value(network.manager_worker_connectivity),
-                worker_worker=_documented_value(network.worker_worker_connectivity),
-                published_port_range=_documented_value(network.published_port_range),
-                outbound_compute=_documented_value(network.outbound_compute_network),
+            partitions=_section_status([slurm.default_partition, slurm.partitions]),
+            network=_section_status(
+                [
+                    network.manager_worker_connectivity,
+                    network.worker_worker_connectivity,
+                    network.published_port_range,
+                    network.manager_address_guidance,
+                    network.outbound_compute_network,
+                ]
             ),
+            storage="probe_required",
         ),
-        field_status=field_status,
-        validation=ProfileValidation(
-            state=state,
-            documented_fields=documented,
-            probe_required_fields=probes,
-            conflicting_fields=conflicts,
+        provenance=PolicyProvenance(
+            discovery_report=discovery_report_reference,
+            run_id=run_id,
+            references={
+                "/scheduler/type": "/findings/scheduler.type",
+                "/scheduler/submit_command": "/findings/scheduler.submit_command",
+                "/submission/options": "/findings/submission.options",
+                "/partitions/default": "/findings/submission.default_partition",
+                "/partitions/limits": "/findings/submission.partitions",
+                "/network/manager_worker": "/findings/network.manager_worker",
+                "/network/worker_worker": "/findings/network.worker_worker",
+                "/network/port_range": "/findings/network.published_port_range",
+                "/network/manager_address": (
+                    "/findings/network.manager_address_guidance"
+                ),
+                "/network/outbound_compute": "/findings/network.outbound_compute",
+            },
         ),
-        required_probes=required_probes,
-        provenance=Provenance(report=report_filename, run_id=run_id),
     )
 
 
@@ -278,3 +264,19 @@ def _coverage_status(status: str) -> str:
 
 def _documented_value(finding: Any) -> Any | None:
     return finding.value if finding.status == "documented" else None
+
+
+def _section_status(findings: list[Any]) -> str:
+    statuses = [finding.status for finding in findings]
+    if "conflicting" in statuses:
+        return "conflicting"
+    if all(status == "not_applicable" for status in statuses):
+        return "not_applicable"
+    documented = sum(status == "documented" for status in statuses)
+    if documented == len(statuses):
+        return "documented"
+    if documented:
+        return "partial"
+    if all(status in {"requires_probe", "not_applicable"} for status in statuses):
+        return "probe_required"
+    return "partial"

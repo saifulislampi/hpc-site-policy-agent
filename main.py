@@ -6,6 +6,7 @@ import argparse
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -27,10 +28,6 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--site", required=True, help="Human-readable HPC site name.")
-    parser.add_argument(
-        "--organization",
-        help="Organization name stored in the candidate site policy.",
-    )
     parser.add_argument(
         "--keyword",
         action="append",
@@ -142,6 +139,28 @@ def slugify(value: str) -> str:
     return value.strip("-") or "site"
 
 
+def resolve_output_paths(
+    args: argparse.Namespace,
+    *,
+    site_id: str,
+    timestamp: datetime | None = None,
+) -> tuple[Path, Path]:
+    run_timestamp = timestamp or datetime.now().astimezone()
+    filename_prefix = f"{site_id}-{run_timestamp.strftime('%Y%m%d-%H%M%S')}"
+    output_dir = Path(args.output_dir)
+    discovery_output = (
+        Path(args.discovery_output)
+        if args.discovery_output
+        else output_dir / f"{filename_prefix}.discovery-report.json"
+    )
+    site_policy_output = (
+        Path(args.site_policy_output)
+        if args.site_policy_output
+        else output_dir / f"{filename_prefix}.site-policy.json"
+    )
+    return discovery_output, site_policy_output
+
+
 def main() -> int:
     load_dotenv()
     args = parse_args()
@@ -179,21 +198,18 @@ def main() -> int:
             log_dir=args.log_dir,
         )
         site_id = slugify(args.site)
-        discovery_output = (
-            Path(args.discovery_output)
-            if args.discovery_output
-            else Path(args.output_dir) / f"{site_id}.discovery-report.json"
+        discovery_output, site_policy_output = resolve_output_paths(
+            args,
+            site_id=site_id,
         )
-        site_policy_output = (
-            Path(args.site_policy_output)
-            if args.site_policy_output
-            else Path(args.output_dir) / f"{site_id}.site-policy.json"
+        discovery_report_reference = os.path.relpath(
+            discovery_output,
+            start=site_policy_output.parent,
         )
         artifacts = agent.run(
             site_name=args.site,
             site_id=site_id,
-            organization=args.organization,
-            discovery_report_filename=discovery_output.name,
+            discovery_report_reference=discovery_report_reference,
             keywords=args.keyword,
             allowed_domains=args.allowed_domain,
         )

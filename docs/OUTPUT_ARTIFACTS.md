@@ -6,7 +6,7 @@ generate these files independently.
 
 ## Detailed discovery report
 
-Default filename: `outputs/<site-id>.discovery-report.json`
+Default filename: `outputs/<site-id>-<YYYYMMDD-HHMMSS>.discovery-report.json`
 
 Audience: researchers, debugging, provenance review, and paper evaluation.
 
@@ -23,26 +23,50 @@ This file may change within the `0.1` research schema as evaluation needs grow.
 
 ## Candidate site policy
 
-Default filename: `outputs/<site-id>.site-policy.json`
+Default filename: `outputs/<site-id>-<YYYYMMDD-HHMMSS>.site-policy.json`
 
 Audience: Floability, site-profile generators, validators, and probe runners.
 
-It deliberately separates:
+It contains only values Floability can consume or a profiler can validate:
 
-1. `profile`: actual normalized values only;
-2. `field_status`: documentation state and discovery-report source IDs;
-3. `required_probes`: unresolved operational checks with JSON-pointer targets;
-4. `provenance`: the detailed report filename and run ID.
+- scheduler type and submission command;
+- every documented submission option with a semantic name, all documented
+  syntax forms, a boolean `required`, example, and actual/default value;
+- default partition and per-partition limits;
+- normalized network values;
+- explicit null storage placeholders;
+- section-level validation state.
+- a small provenance block containing the discovery-report path, run ID, and
+  JSON Pointer references from policy values to detailed findings.
 
-`profile_state="candidate"` means documentation extraction is not equivalent to
-runtime validation. A later validator may promote the artifact after required
-probes succeed.
+Detailed field status, evidence, source IDs, and unresolved questions remain
+exclusively in the discovery report. The site policy stores references only.
+
+Example:
+
+```json
+{
+  "provenance": {
+    "discovery_report": "purdue-anvil-20260715-190000.discovery-report.json",
+    "run_id": "uuid",
+    "references": {
+      "/submission/options": "/findings/submission.options"
+    }
+  }
+}
+```
 
 ## Stability rules
 
-- Never insert guessed values into `profile`.
-- A `requires_probe` field has a null profile value.
-- A documented field references direct evidence through source IDs.
+- Never insert guessed values into the site policy.
+- Include only submission syntax explicitly shown in selected target-site pages.
+- Keep documented examples separate from actual/default `value` fields.
+- Set `required=true` only from explicit mandatory or minimum-field wording;
+  appearing in an example script is insufficient.
+- An example allocation name must never become the user's allocation value.
+- Keep partition choices in `partitions.limits`; do not duplicate them in an
+  option-level allowed-values field.
+- A field requiring a probe has a null site-policy value.
 - Sibling-site pages may appear only as rejected detailed-report sources.
 - Increment `schema_version` when a consumer-facing field is removed, renamed,
   or changes type.
