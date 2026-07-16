@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from pydantic import BaseModel
+
 from models import ToolDefinition
 from providers import openai_provider
 
@@ -76,3 +78,44 @@ def test_openai_adapter_translates_shared_tool_definition(monkeypatch):
     assert translated["type"] == "function"
     assert translated["strict"] is True
     assert "format" not in translated["parameters"]["properties"]["url"]
+
+
+def test_grouped_extraction_forces_the_supplied_tool_name(monkeypatch):
+    class Result(BaseModel):
+        value: str
+
+    class ExtractionResponses(FakeResponses):
+        def create(self, **request):
+            self.request = request
+            return SimpleNamespace(
+                output=[
+                    SimpleNamespace(
+                        type="function_call",
+                        name="submit_submission_policy",
+                        arguments='{"value":"ok"}',
+                    )
+                ],
+                usage=None,
+            )
+
+    responses = ExtractionResponses()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        openai_provider,
+        "OpenAI",
+        lambda **kwargs: SimpleNamespace(responses=responses),
+    )
+    provider = openai_provider.OpenAIProvider(model="test-model")
+
+    result = provider.extract_structured(
+        system_prompt="system",
+        user_prompt="user",
+        schema=Result,
+        tool_name="submit_submission_policy",
+    )
+
+    assert result.value == "ok"
+    assert responses.request["tool_choice"] == {
+        "type": "function",
+        "name": "submit_submission_policy",
+    }

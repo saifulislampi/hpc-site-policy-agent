@@ -116,6 +116,15 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="Maximum chunks retrieved per ordinary policy field; default 3.",
     )
+    parser.add_argument(
+        "--extraction-profile",
+        choices=["site-policy", "evaluation-full"],
+        default="site-policy",
+        help=(
+            "Fields to extract: site-policy is the partial-first operational default; "
+            "evaluation-full also requests secondary policy fields."
+        ),
+    )
     parser.add_argument("--log-dir", default="logs")
     parser.add_argument(
         "--output-dir",
@@ -226,6 +235,7 @@ def main() -> int:
             refresh_corpus=args.refresh_corpus,
             chunk_chars=args.chunk_chars,
             retrieval_top_k=args.retrieval_top_k,
+            extraction_profile=args.extraction_profile,
         )
         discovery_output, site_policy_output = resolve_output_paths(
             args,

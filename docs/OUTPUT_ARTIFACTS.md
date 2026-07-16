@@ -1,6 +1,6 @@
 # Output artifacts
 
-Every successful run writes two versioned JSON artifacts. They are built
+Every completed or partial run writes two versioned JSON artifacts. They are built
 deterministically from one provider-neutral extraction result; providers do not
 generate these files independently.
 
@@ -21,6 +21,8 @@ It contains:
 - retrieved-but-uncited chunks, so abstention can be distinguished from a
   retrieval miss;
 - unresolved questions and request/token statistics.
+- extraction profile, `profile_state`, requested and uninvestigated fields,
+  verified/null/failed field counts, correction attempts, and group errors.
 
 This file may change within the `0.1` research schema as evaluation needs grow.
 
@@ -31,6 +33,9 @@ Default filename: `outputs/<site-id>-<YYYYMMDD-HHMMSS>.site-policy.json`
 Audience: Floability, site-profile generators, validators, and probe runners.
 
 It contains only values Floability can consume or a profiler can validate:
+
+- `profile_state`, which is `partial` whenever a requested field remains
+  unverified;
 
 - scheduler type and submission command;
 - every documented submission option with a semantic name, all documented
@@ -73,6 +78,11 @@ Example:
 - Keep partition choices in `partitions.limits`; do not duplicate them in an
   option-level allowed-values field.
 - A field requiring a probe has a null site-policy value.
+- A timed-out or invalid extraction group does not discard other results. Its
+  fields are null in the site policy and marked `extraction_failed` in the
+  detailed report.
+- A field omitted by the chosen extraction profile is `not_investigated`, not
+  documentation silence.
 - Sibling-site pages may be retained in the corpus and detailed report, but are
   excluded by the retrieval scope parameter and can never be cited.
 - Increment `schema_version` when a consumer-facing field is removed, renamed,

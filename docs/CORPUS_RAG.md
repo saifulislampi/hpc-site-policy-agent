@@ -26,12 +26,19 @@ past failed or topic-mismatched candidates. Retrieval uses multiple query varian
 deduplicates identical content, penalizes navigation fragments, and prevents
 hardware-only tables from serving as scheduler or networking policy evidence.
 
-The extraction prompt uses field-local references such as `partitions:R1`
-instead of exposing reusable corpus chunk IDs. Field references map to a
-deduplicated global evidence library, so a chunk shared by several fields is
-included in the prompt only once. The application resolves those references to
-canonical chunk provenance, validates literal quotes, and permits
-one correction attempt with the same CLI-selected model.
+Retrieval runs only for fields requested by the selected extraction profile.
+The default `site-policy` profile requests consumer-facing submission and
+network fields. `evaluation-full` additionally requests walltime, memory,
+job-size, charging, purge, cost-trap, and login-node socket policies.
+
+After retrieval, Python divides chunk text into exact, zero-overlap evidence
+spans. The extraction prompt uses field-local references such as
+`partitions:E4`; the model selects these IDs and never has to reproduce a quote,
+URL, heading, or chunk ID. Python inserts the exact literal span and canonical
+provenance. Submission, network, and optional operational groups are extracted
+independently with the same CLI-selected model. A bad reference receives one
+group correction attempt while already valid fields are preserved. A failed
+group becomes explicit null fields rather than aborting the artifact.
 
 `--refresh-corpus` is merge-safe: a rediscovered changed page replaces its old
 version, but a stored web page is never deleted merely because the current

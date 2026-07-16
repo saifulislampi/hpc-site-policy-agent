@@ -99,11 +99,25 @@ class DiscoveryReport(StrictModel):
     run: ReportRun
     discovery: ReportDiscovery
     corpus: ReportCorpus
+    extraction: "ReportExtraction"
     sources: list[ReportSource]
     retrieval: dict[str, "ReportFieldRetrieval"]
     findings: dict[str, ReportFinding]
     unresolved_questions: list[str]
     statistics: DiscoveryStatistics
+
+
+class ReportExtraction(StrictModel):
+    profile: Literal["site-policy", "evaluation-full"]
+    profile_state: Literal["complete", "partial"]
+    requested_fields: list[str]
+    not_investigated_fields: list[str]
+    documented_fields: int = Field(ge=0)
+    null_fields: int = Field(ge=0)
+    unverified_fields: list[str]
+    failed_fields: list[str]
+    retried_fields: list[str]
+    group_errors: dict[str, str]
 
 
 class SiteDescriptor(StrictModel):
@@ -184,6 +198,7 @@ class ReportFieldRetrieval(StrictModel):
 
 class SitePolicyArtifact(StrictModel):
     schema_version: Literal["0.1"] = "0.1"
+    profile_state: Literal["complete", "partial"]
     site: SiteDescriptor
     scheduler: SchedulerProfile
     submission: SubmissionProfile

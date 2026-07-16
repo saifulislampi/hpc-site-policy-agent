@@ -17,6 +17,7 @@ from schemas import (
     PolicyValidation,
     ReportCorpus,
     ReportEvidence,
+    ReportExtraction,
     ReportFieldRetrieval,
     ReportFinding,
     ReportRun,
@@ -74,7 +75,9 @@ def build_run_artifacts(
     retrievals: dict[str, Any],
     citation_audit: dict[str, Any],
     corpus_manifest_reference: str,
+    extraction_summary: dict[str, Any] | None = None,
 ) -> RunArtifacts:
+    extraction_summary = extraction_summary or _default_extraction_summary(extracted)
     retrieved_urls = {
         str(hit.chunk.source_url)
         for retrieval in retrievals.values()
@@ -111,6 +114,7 @@ def build_run_artifacts(
             document_count=corpus_snapshot.manifest.document_count,
             chunk_count=corpus_snapshot.manifest.chunk_count,
         ),
+        extraction=ReportExtraction(**extraction_summary),
         sources=sources,
         retrieval=_build_retrieval_report(
             retrievals, citation_audit, source_ids
@@ -142,6 +146,7 @@ def build_run_artifacts(
         run_id=run_id,
         corpus_id=corpus_snapshot.manifest.corpus_id,
         corpus_fingerprint=corpus_snapshot.manifest.corpus_fingerprint,
+        profile_state=extraction_summary["profile_state"],
     )
     return RunArtifacts(discovery_report=discovery_report, site_policy=site_policy)
 
@@ -240,6 +245,7 @@ def _build_site_policy(
     run_id: str,
     corpus_id: str,
     corpus_fingerprint: str,
+    profile_state: str,
 ) -> SitePolicyArtifact:
     slurm = extracted.slurm_policy
     network = extracted.network_policy
@@ -253,6 +259,7 @@ def _build_site_policy(
     }
 
     return SitePolicyArtifact(
+        profile_state=profile_state,
         site=SiteDescriptor(
             id=site_id,
             name=extracted.site_name,
@@ -378,3 +385,30 @@ def _section_status(findings: list[Any]) -> str:
     if all(status in {"requires_probe", "not_applicable"} for status in statuses):
         return "probe_required"
     return "partial"
+
+
+def _default_extraction_summary(extracted: ExtractedPolicy) -> dict[str, Any]:
+    findings = [
+        finding
+        for policy in (extracted.slurm_policy, extracted.network_policy)
+        for finding in policy.__dict__.values()
+    ]
+    documented = sum(
+        finding.status in {"documented", "conflicting"} for finding in findings
+    )
+    return {
+        "profile": "evaluation-full",
+        "profile_state": "complete" if documented == len(findings) else "partial",
+        "requested_fields": list(FINDING_PATHS),
+        "not_investigated_fields": [],
+        "documented_fields": documented,
+        "null_fields": len(findings) - documented,
+        "unverified_fields": [
+            field
+            for field, finding in zip(FINDING_PATHS, findings)
+            if finding.status not in {"documented", "conflicting"}
+        ],
+        "failed_fields": [],
+        "retried_fields": [],
+        "group_errors": {},
+    }

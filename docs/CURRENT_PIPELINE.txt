@@ -27,6 +27,8 @@ CLI arguments + environment
        → search_web | fetch_page | finish_discovery
        → validate every tool call and selected URL locally
        → stop at finish_discovery or max_steps
+       → if the model loop fails/times out, retain deterministic crawl state
+         and continue with a partial-discovery selection
   → construct canonical web corpus records
        → preserve URL, scope, trust, headings, hashes, and fetched timestamp
        → keep tables atomic as Markdown
@@ -42,32 +44,47 @@ CLI arguments + environment
        → --refresh-corpus replaces changed rediscovered pages
        → pages not rediscovered remain stored
   → build a transient CPU BM25 index
-  → retrieve separately for every extraction field
+  → choose extraction profile
+       → site-policy (default): operational submission + network fields
+       → evaluation-full: default fields + secondary operational policies
+  → retrieve separately for every profile-requested field
        → use several lexical query variants per field
        → site_scope is an input filter before ranking
        → allow target_site + applicable organization_general
        → exclude sibling + unrelated
        → deduplicate byte-identical content from alternate URLs
        → suppress navigation noise and field-incompatible hardware tables
-       → include charging_model + purge_policy + cost_traps
+       → evaluation-full includes charging_model + purge_policy + cost_traps
        → retain whole Policies/FAQ candidates for those fields
-  → one provider structured-extraction call over field-grouped chunks
-       → expose field-local references such as partitions:R1
-       → store each unique chunk text once in a global evidence library
-       → resolve references to canonical chunk IDs and URLs locally
-  → validate every evidence item locally
+  → split retrieved text into exact, zero-overlap evidence spans
+       → expose field-local references such as partitions:E4
+       → model selects span IDs instead of copying quotes or provenance
+       → Python inserts the literal span, canonical chunk ID, URL, and heading
+  → independent provider structured-extraction calls
+       → submission group
+       → network group
+       → operational group only for evaluation-full
+       → all groups use the single CLI --model
+  → validate each field independently
        → chunk_id belongs to that field's retrieved list
        → evidence URL matches the chunk URL
        → quote is a literal substring of the chunk
-       → retry one complete extraction on validation failure using the same model
+       → preserve valid fields
+       → retry only fields with invalid evidence references once
+       → on timeout/invalid retry, set affected values to null
+         with documentation_status=extraction_failed
+       → fields outside the profile are null/not_investigated
   → log every retrieved chunk, score, citation state, and retrieved-but-uncited ID
   → build detailed discovery report
        → run, discovery, source scope/trust, corpus fingerprint
        → field retrieval audit + scores
        → findings + chunk/source evidence
        → sibling retained/retrieved counts
+       → profile, requested/not-investigated/unverified/failed fields
+       → group errors and retried fields for evaluation
   → build compact candidate site policy
        → consumer-ready values only
+       → profile_state=complete|partial
        → provenance references detailed findings + corpus fingerprint
   → write timestamped report + site-policy JSON
   → write JSONL execution trace

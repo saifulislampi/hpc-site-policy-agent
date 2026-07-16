@@ -294,6 +294,70 @@ class ScoutTools:
             documents.append(document)
         return documents
 
+    def partial_selection(self, *, reason: str) -> DiscoverySelection:
+        """Finish from deterministic crawl state when the model loop cannot finish."""
+
+        coverage = self.discovery_coverage()
+        topics = []
+        for item in (coverage.submission_policy, coverage.networking_policy):
+            if item.status == "not_investigated":
+                item = item.model_copy(
+                    update={
+                        "status": "search_exhausted",
+                        "notes": [*item.notes, f"Agent discovery ended early: {reason}"],
+                    }
+                )
+            topics.append(item)
+        coverage = coverage.model_copy(
+            update={
+                "submission_policy": topics[0],
+                "networking_policy": topics[1],
+            }
+        )
+        selected = list(self._coverage_support_urls(coverage))
+        ranked_documents = sorted(
+            self.documents.values(),
+            key=lambda item: item.classification.score,
+            reverse=True,
+        )
+        selected.extend(
+            str(document.url)
+            for document in ranked_documents
+            if document.classification.site_scope == "target_site"
+        )
+        selected = list(dict.fromkeys(selected))[:10]
+        self.selected_urls.update(selected)
+        for url in selected:
+            candidate = self.candidates.get(url)
+            if candidate is not None:
+                candidate.selected = True
+        unanswered = [
+            item.topic
+            for item in topics
+            if item.status != "evidence_found"
+        ]
+        selection = DiscoverySelection(
+            source_urls=selected,
+            summary=(
+                "Deterministic discovery state was retained after the model loop "
+                f"ended early: {reason}"
+            ),
+            unanswered_topics=unanswered,
+            canonical_root=self.canonical_root,
+            coverage=coverage,
+            termination_reason="partial_discovery_fallback",
+        )
+        self._emit(
+            "selection",
+            {
+                "selected_urls": selected,
+                "termination_reason": selection.termination_reason,
+                "coverage": coverage.model_dump(mode="json"),
+                "fallback_reason": reason,
+            },
+        )
+        return selection
+
     def corpus_documents(self) -> list[FetchedDocument]:
         """Return eligible web pages plus retained sibling negative controls."""
 

@@ -9,9 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 from schemas.discovery import DiscoveryCoverage
 
 
-FindingStatus = Literal["documented", "conflicting", "requires_probe", "not_applicable"]
+FindingStatus = Literal[
+    "documented",
+    "conflicting",
+    "requires_probe",
+    "not_applicable",
+    "not_investigated",
+]
 EvidenceInterpretation = Literal["direct", "inferred", "conflicting", "silent"]
-DocumentationStatus = Literal["documented", "silent", "discovery_failed", "not_applicable"]
+DocumentationStatus = Literal[
+    "documented",
+    "silent",
+    "discovery_failed",
+    "extraction_failed",
+    "not_applicable",
+    "not_investigated",
+]
 ConnectivityValue = Literal["allowed", "blocked", "conditional"]
 OptionValue = str | int | float | bool
 
@@ -26,6 +39,13 @@ class Evidence(StrictModel):
     source_title: str = Field(min_length=1, max_length=500)
     heading: str | None = Field(max_length=500)
     quote: str = Field(min_length=1, max_length=1200)
+    interpretation: EvidenceInterpretation
+
+
+class EvidenceReference(StrictModel):
+    """A model-selected reference to an application-generated literal span."""
+
+    evidence_ref: str = Field(min_length=1, max_length=150)
     interpretation: EvidenceInterpretation
 
 
@@ -58,14 +78,24 @@ class FindingBase(StrictModel):
         if self.status == "requires_probe" and self.documentation_status not in {
             "silent",
             "discovery_failed",
+            "extraction_failed",
         }:
             raise ValueError(
-                "A requires_probe finding must distinguish silence from discovery failure."
+                "A requires_probe finding must distinguish documentation silence, "
+                "discovery failure, and extraction failure."
             )
         if self.status == "not_applicable" and self.documentation_status != "not_applicable":
             raise ValueError(
                 "A not_applicable finding needs documentation_status=not_applicable."
             )
+        if self.status == "not_investigated":
+            if self.value is not None or self.evidence:
+                raise ValueError("A not_investigated finding must be null and unevidenced.")
+            if self.documentation_status != "not_investigated":
+                raise ValueError(
+                    "A not_investigated finding needs "
+                    "documentation_status=not_investigated."
+                )
         return self
 
 
@@ -114,6 +144,53 @@ class SubmissionOption(StrictModel):
 
 class SubmissionOptionsFinding(FindingBase):
     value: list[SubmissionOption] | None
+
+
+class ReferenceStringFinding(StringFinding):
+    evidence: list[EvidenceReference]
+
+
+class ReferenceConnectivityFinding(ConnectivityFinding):
+    evidence: list[EvidenceReference]
+
+
+class ReferencePartitionListFinding(PartitionListFinding):
+    evidence: list[EvidenceReference]
+
+
+class ReferencePortRangeFinding(PortRangeFinding):
+    evidence: list[EvidenceReference]
+
+
+class ReferenceSubmissionOptionsFinding(SubmissionOptionsFinding):
+    evidence: list[EvidenceReference]
+
+
+class SubmissionExtraction(StrictModel):
+    scheduler: ReferenceStringFinding
+    submit_command: ReferenceStringFinding
+    submission_options: ReferenceSubmissionOptionsFinding
+    account_allocation_policy: ReferenceStringFinding
+    default_partition: ReferenceStringFinding
+    partitions: ReferencePartitionListFinding
+
+
+class NetworkExtraction(StrictModel):
+    manager_worker_connectivity: ReferenceConnectivityFinding
+    worker_worker_connectivity: ReferenceConnectivityFinding
+    published_port_range: ReferencePortRangeFinding
+    manager_address_guidance: ReferenceStringFinding
+    outbound_compute_network: ReferenceConnectivityFinding
+
+
+class OperationalExtraction(StrictModel):
+    walltime_policy: ReferenceStringFinding
+    memory_policy: ReferenceStringFinding
+    job_size_policy: ReferenceStringFinding
+    charging_model: ReferenceStringFinding
+    purge_policy: ReferenceStringFinding
+    cost_traps: ReferenceStringFinding
+    login_node_socket_policy: ReferenceStringFinding
 
 
 class DocumentSource(StrictModel):

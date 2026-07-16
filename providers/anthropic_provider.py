@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 from models import ModelTurn, ProviderError, ToolDefinition, ToolResult
 from providers.base import BaseProvider
-from schemas import ExtractedPolicy
 
 
 class AnthropicProvider(BaseProvider):
@@ -30,5 +31,12 @@ class AnthropicProvider(BaseProvider):
     ) -> ModelTurn:
         raise ProviderError("Anthropic provider is not implemented in the first POC.")
 
-    def extract_report(self, *, system_prompt: str, user_prompt: str) -> ExtractedPolicy:
+    def extract_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        schema: type[BaseModel],
+        tool_name: str,
+    ) -> BaseModel:
         raise ProviderError("Anthropic provider is not implemented in the first POC.")

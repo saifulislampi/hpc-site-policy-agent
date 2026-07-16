@@ -16,6 +16,11 @@ adapter plan is in [`docs/PROVIDER_ADAPTERS.md`](docs/PROVIDER_ADAPTERS.md).
 
 HPC Policy Scout is a bounded, site-aware agentic RAG system for onboarding an unfamiliar HPC site. From a site name, search keywords, and approved domains, it discovers authoritative pages, maintains a reusable text corpus, retrieves evidence per policy field, and produces structured JSON covering:
 
+Its partial-first design supports the research goal described by *Agentic
+Preflight: Constructing Evidence-Backed Site Policies for Portable Workflows*:
+verified fields remain usable and measurable even when other fields are silent,
+invalid, or time out.
+
 - Slurm submission requirements and policy: account/allocation, partition or queue, walltime, memory, job-size, and charging notes.
 - Networking information relevant to manager/worker systems: compute-to-login, worker-to-worker, published port ranges, manager address guidance, and outbound access.
 - Explicit unknowns marked `requires_probe` when documentation is silent.
@@ -32,10 +37,12 @@ overlap. A transient CPU-only BM25 index retrieves evidence independently for
 each output field; no vector database, embeddings, GPU, or new Python package is
 required.
 
-Each field uses multiple high-recall queries followed by local deduplication and
-noise guards. Extraction cites field-local references, which are resolved to
-canonical chunk IDs by the application. A failed evidence validation receives
-one bounded correction attempt using the same `--model`.
+Each requested field uses multiple high-recall queries followed by local
+deduplication and noise guards. Python creates exact evidence spans; the model
+selects field-local span IDs, and the application inserts the literal quote and
+canonical provenance. The default profile extracts independent submission and
+network groups. Valid fields survive a failed group or correction attempt, and
+unverified values remain null in a partial artifact.
 
 The agent only discovers documentation. It does not execute shell commands, submit jobs, scan ports, or modify an HPC system. Operational facts must later be verified by deterministic probes.
 
@@ -69,6 +76,7 @@ python main.py \
   --provider openai \
   --model gpt-5-mini \
   --max-steps 2 \
+  --extraction-profile site-policy \
   --corpus-dir corpora/purdue-anvil
 ```
 
@@ -99,6 +107,7 @@ Useful options:
 --refresh-corpus          Replace changed rediscovered pages; retain unseen pages
 --chunk-chars N           Ordinary text chunk limit; default 1800
 --retrieval-top-k N       Chunks per ordinary extraction field; default 3
+--extraction-profile P    site-policy (default) or evaluation-full
 --site-alias NAME        Additional target-site alias; repeatable
 --preferred-path-token T Target-site URL path token; repeatable
 --exclude-site-token T   Sibling-site token to reject; repeatable
@@ -133,13 +142,15 @@ Each run creates:
 - `outputs/<site-id>-<timestamp>.discovery-report.json`: the detailed research artifact containing
   run metadata, source scope/trust, corpus fingerprint, per-field retrieval
   scores, retrieved-but-uncited chunks, exact chunk evidence, coverage, and
-  statistics.
+  statistics, extraction profile, verified/null/failed field counts, correction
+  attempts, and group errors.
 - `outputs/<site-id>-<timestamp>.site-policy.json`: the small candidate operational profile with
   normalized scheduler values, every documented submission option with exact
   syntax, partition limits, network values, storage placeholders, and
   section-level validation state. Evidence and source metadata remain in the
   discovery report; the policy stores its run ID, report path, corpus
-  ID/fingerprint, and JSON Pointer links to detailed findings.
+  ID/fingerprint, and JSON Pointer links to detailed findings. Its
+  `profile_state` is `partial` whenever a requested value remains unverified.
 - A JSONL execution trace recording canonical-root selection, generated and repaired queries, candidate rankings, classifications, followed links, selected/rejected pages, request counts, token usage, and termination reason.
 
 Use `--output-dir` to place both JSON artifacts elsewhere. Explicit
@@ -160,5 +171,6 @@ pytest -q
 ```
 
 The OpenAI provider is implemented. Claude and Gemini adapters are isolated
-placeholders that will implement the same `BaseProvider` contract and return the
-same `ExtractedPolicy`; no discovery or reporting logic will be duplicated.
+placeholders that will implement the same `BaseProvider` grouped structured
+extraction contract; no discovery, grounding, validation, or reporting logic
+will be duplicated.

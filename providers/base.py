@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from pydantic import BaseModel
+
 from models import ModelTurn, ToolDefinition, ToolResult
-from schemas import ExtractedPolicy
 
 
 class BaseProvider(ABC):
@@ -31,10 +32,14 @@ class BaseProvider(ABC):
         """Continue the session, optionally forcing one named tool call."""
 
     @abstractmethod
-    def extract_report(
+    def extract_structured(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> ExtractedPolicy:
-        """Run the non-agent structured extraction phase."""
+        schema: type[BaseModel],
+        tool_name: str,
+    ) -> BaseModel:
+        """Extract one bounded field group using a provider-neutral schema."""
+
+        raise NotImplementedError

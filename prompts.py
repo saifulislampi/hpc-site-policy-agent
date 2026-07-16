@@ -35,15 +35,16 @@ Rules:
 
 
 EXTRACTION_SYSTEM_PROMPT = """
-You extract a structured HPC policy report from field-specific retrieved chunks.
+You extract one bounded group of HPC policy fields from field-specific evidence spans.
 
 Rules:
 - Use only chunks retrieved for the field being populated.
-- Every documented or conflicting claim must include the field-local EVIDENCE REF in its chunk_id field, a short literal quote, and source.
-- The evidence quote must be an exact substring of that cited chunk, including punctuation and spacing.
-- Never copy or invent a global corpus chunk ID. Use only references such as partitions:R1 from the current field.
-- Follow the field's EVIDENCE REF to its GLOBAL CHUNK entry, and copy evidence only from that global entry. A global chunk may be shared by several fields but its text appears only once.
+- Every documented or conflicting claim must select one or more field-local EVIDENCE REF values.
+- Return each selected reference in evidence_ref with its interpretation. Do not copy quotes, URLs, headings, or chunk IDs; the application resolves them locally.
+- Never invent a reference or use a reference belonging to another field.
 - Use status=requires_probe and value=null when operational behavior is not documented.
+- Do not return status=not_investigated or documentation_status=extraction_failed;
+  those states are assigned only by the application after profile selection or failure.
 - Set documentation_status=silent only when deterministic target-site coverage says documentation_silent.
 - Set documentation_status=discovery_failed when deterministic coverage says search_exhausted.
 - Set documentation_status=documented for documented or conflicting findings.
@@ -70,8 +71,8 @@ Rules:
 - A published port range must include protocol plus integer start and end ports.
 - Include the nearest section heading with each evidence quote when it is available.
 - Extract charging_model, purge_policy, and cost_traps independently. Policies and FAQ chunks may contain relevant facts that do not share the query's exact keywords.
-- Copy the URL shown with the cited EVIDENCE REF; the application will resolve the reference to canonical chunk provenance.
-- Call submit_policy_report exactly once with the complete report.
+- Return exactly the fields in the requested extraction-group schema.
+- Call the forced extraction tool exactly once.
 """.strip()
 
 

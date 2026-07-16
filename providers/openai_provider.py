@@ -7,12 +7,11 @@ import os
 from typing import Any
 
 from openai import OpenAI, OpenAIError
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from models import ModelTurn, ProviderError, ToolCall, ToolDefinition, ToolResult
 from providers.base import BaseProvider
 from providers.openai_schema import openai_compatible_schema
-from schemas import ExtractedPolicy
 
 
 class OpenAIProvider(BaseProvider):
@@ -133,19 +132,19 @@ class OpenAIProvider(BaseProvider):
             response_id=getattr(response, "id", None),
         )
 
-    def extract_report(
+    def extract_structured(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> ExtractedPolicy:
+        schema: type[BaseModel],
+        tool_name: str,
+    ) -> BaseModel:
         report_tool = {
             "type": "function",
-            "name": "submit_policy_report",
-            "description": (
-                "Submit the complete grounded HPC Slurm and networking policy report."
-            ),
-            "parameters": openai_compatible_schema(ExtractedPolicy.model_json_schema()),
+            "name": tool_name,
+            "description": "Submit one grounded HPC policy extraction group.",
+            "parameters": openai_compatible_schema(schema.model_json_schema()),
             "strict": True,
         }
 
@@ -155,7 +154,7 @@ class OpenAIProvider(BaseProvider):
                 instructions=system_prompt,
                 input=[{"role": "user", "content": user_prompt}],
                 tools=[report_tool],
-                tool_choice={"type": "function", "name": "submit_policy_report"},
+                tool_choice={"type": "function", "name": tool_name},
                 parallel_tool_calls=False,
                 store=False,
             )
@@ -172,15 +171,15 @@ class OpenAIProvider(BaseProvider):
             item
             for item in response.output
             if getattr(item, "type", None) == "function_call"
-            and getattr(item, "name", None) == "submit_policy_report"
+            and getattr(item, "name", None) == tool_name
         ]
         if len(function_calls) != 1:
             raise ProviderError(
-                "Expected exactly one submit_policy_report function call."
+                f"Expected exactly one {tool_name} function call."
             )
 
         try:
             data = json.loads(function_calls[0].arguments)
-            return ExtractedPolicy.model_validate(data)
+            return schema.model_validate(data)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise ProviderError(f"Invalid structured policy report: {exc}") from exc

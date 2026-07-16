@@ -96,6 +96,7 @@ class LexicalRetriever:
         *,
         allowed_scopes: set[SiteScope],
         top_k: int,
+        fields: set[str] | None = None,
     ) -> dict[str, FieldRetrieval]:
         return {
             field: self.retrieve(
@@ -105,6 +106,7 @@ class LexicalRetriever:
                 top_k=top_k,
             )
             for field, query in FIELD_QUERIES.items()
+            if fields is None or field in fields
         }
 
     def retrieve(

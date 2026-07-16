@@ -9,6 +9,7 @@ from schemas.artifacts import (
     PolicyProvenance,
     PolicyValidation,
     ReportEvidence,
+    ReportExtraction,
     ReportFinding,
     ReportFieldRetrieval,
     ReportCorpus,
@@ -51,10 +52,13 @@ from schemas.extraction import (
     DocumentationStatus,
     DocumentSource,
     Evidence,
+    EvidenceReference,
     EvidenceInterpretation,
     ExtractedPolicy,
     FindingStatus,
     NetworkPolicy,
+    NetworkExtraction,
+    OperationalExtraction,
     PartitionListFinding,
     PartitionSpec,
     PortRange,
@@ -63,6 +67,7 @@ from schemas.extraction import (
     StringFinding,
     SubmissionOption,
     SubmissionOptionsFinding,
+    SubmissionExtraction,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]

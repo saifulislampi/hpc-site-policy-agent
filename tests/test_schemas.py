@@ -61,3 +61,25 @@ def test_inferred_evidence_cannot_establish_definitive_policy():
                 }
             ],
         )
+
+
+def test_partial_outcome_states_are_explicit_and_null():
+    failed = StringFinding(
+        value=None,
+        status="requires_probe",
+        documentation_status="extraction_failed",
+        confidence=0.0,
+        explanation="The bounded extraction request timed out.",
+        evidence=[],
+    )
+    unrequested = StringFinding(
+        value=None,
+        status="not_investigated",
+        documentation_status="not_investigated",
+        confidence=0.0,
+        explanation="The selected profile did not request this field.",
+        evidence=[],
+    )
+
+    assert failed.value is None
+    assert unrequested.status == "not_investigated"

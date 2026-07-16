@@ -15,10 +15,10 @@ continue_agent
   → support a forced finish_discovery tool choice
   → normalize the next response
 
-extract_report
-  → request the shared ExtractedPolicy schema
+extract_structured
+  → request one shared submission, network, or operational group schema
   → validate with Pydantic
-  → return ExtractedPolicy
+  → return model-selected field-local evidence span references
 ```
 
 Implementation order:

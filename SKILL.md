@@ -19,6 +19,8 @@ main.py
       → providers/: provider-specific tool-calling adapters
       → tools.py: canonical-root crawl, section extraction, coverage gates, tools
   → prompts.py: discovery and extraction instructions
+  → extraction_profiles.py: requested fields and independent model-call groups
+  → grounding.py: exact application-generated evidence spans
   → schemas/
       → discovery.py: source, document, selection, and coverage types
       → corpus.py: canonical document, chunk, manifest, and retrieval types
@@ -34,8 +36,9 @@ and topic-link crawling. Scope is assigned from URL paths, independently from
 trust. Sibling pages are retained as negative-control chunks, but scope filters
 exclude them before retrieval scoring. Multiple topic candidates and query
 variants provide breadth; content deduplication and field-aware guards control
-noise. Extraction is a separate constrained model call over field-specific
-retrieved chunks using field-local evidence references.
+noise. Extraction uses separate constrained submission, network, and optional
+operational calls over field-specific evidence spans. Python creates and
+resolves the spans; the model only selects field-local references.
 
 ## Trust boundary
 
@@ -60,8 +63,8 @@ Capability questions such as port reachability, path writability, or worker inte
 ## Coding rules
 
 - Keep the core loop provider-neutral; provider-specific formats stay in `providers/`.
-- Every provider must return the shared `ExtractedPolicy`; providers never build
-  output artifacts directly.
+- Every provider must support the shared grouped Pydantic schemas; providers
+  never build output artifacts directly.
 - Prefer plain Python and official SDKs over an agent framework for this POC.
 - Keep tools narrow and typed. Add no general shell, browser, or code-execution tool.
 - Validate all tool arguments and final outputs with Pydantic.
@@ -86,8 +89,12 @@ Capability questions such as port reachability, path writability, or worker inte
   retrieval parameter, not merely descriptive metadata.
 - Retain stored pages that a refresh run does not rediscover.
 - Log retrieval scores and retrieved-but-uncited chunks.
-- Resolve field-local evidence references to canonical provenance locally, and
-  allow one same-model correction attempt after validation failure.
+- Generate literal, zero-overlap evidence spans locally. Resolve selected
+  field-local references to exact quotes and canonical provenance in Python.
+- Preserve valid fields, retry only invalid references once, and convert a
+  failed group to explicit null/`extraction_failed` findings.
+- Distinguish `not_investigated`, documentation silence, discovery failure, and
+  extraction failure for reproducible evaluation.
 - Preserve complete JSONL traces for reproducibility and evaluation.
 - Add tests for schemas, URL restrictions, duplicate actions, and failure cases.
 - Update `docs/CURRENT_PIPELINE.txt`, `docs/working-example.md`, output

@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timezone
 
 from agent import HPCPolicyScoutAgent
-from models import ModelTurn, ToolCall
+from models import ModelTurn, ProviderError, ToolCall
 from reporting import build_run_artifacts
 from corpus import CorpusStore, LexicalRetriever, build_corpus_records
 from schemas import ChunkerConfiguration, ExtractedPolicy
@@ -41,48 +41,106 @@ class ArtifactProvider:
     def continue_agent(self, *, tool_results, force_tool=None):
         raise AssertionError("The mocked run should finish in one model turn.")
 
-    def extract_report(self, *, system_prompt, user_prompt):
+    def extract_structured(
+        self, *, system_prompt, user_prompt, schema, tool_name
+    ):
         self.extraction_calls += 1
         self.last_extraction_usage = {"input_tokens": 200, "output_tokens": 100}
-        evidence = {}
-        global_chunks = {
-            global_id: (url, title, heading, text)
-            for global_id, url, title, heading, text in re.findall(
-                r"--- GLOBAL CHUNK (G\d+) START ---\nURL: (\S+)\n"
-                r"TITLE: (.*?)\n.*?HEADING PATH: (.*?)\nCHUNK TEXT:\n"
-                r"(.*?)\n--- GLOBAL CHUNK \1 END ---",
-                user_prompt,
-                flags=re.DOTALL,
-            )
-        }
+        references = {}
         for field, body in re.findall(
-            r"--- FIELD (\w+) RETRIEVAL MAP START ---(.*?)"
-            r"--- FIELD \1 RETRIEVAL MAP END ---",
+            r"--- FIELD (\w+) EVIDENCE START ---(.*?)"
+            r"--- FIELD \1 EVIDENCE END ---",
             user_prompt,
             flags=re.DOTALL,
         ):
-            chunks = [
-                (reference, *global_chunks[global_id])
-                for reference, global_id in re.findall(
-                    r"EVIDENCE REF: (\S+)\nGLOBAL CHUNK: (G\d+)", body
-                )
-            ]
-            preferred = next((item for item in chunks if item[1] == JOBS_URL), None)
-            chosen = preferred or (chunks[0] if chunks else None)
-            if chosen:
-                evidence[field] = chosen
-        return make_extracted_policy(self.tools, evidence)
+            found = re.findall(r"EVIDENCE REF: (\S+) ->", body)
+            if found:
+                references[field] = found[0]
+
+        values = {
+            "scheduler": "slurm",
+            "submit_command": "sbatch",
+            "submission_options": [
+                {
+                    "name": "account",
+                    "syntax": ["-A {account}", "--account={account}"],
+                    "required": True,
+                    "example": "-A cis250350",
+                    "value": None,
+                }
+            ],
+            "account_allocation_policy": "Use an approved allocation.",
+            "default_partition": "shared",
+            "partitions": [
+                {
+                    "name": "shared",
+                    "maximum_walltime": "96:00:00",
+                    "maximum_nodes": 1,
+                    "shared_nodes": True,
+                }
+            ],
+        }
+        payload = {}
+        for field in schema.model_fields:
+            if field in values and field in references:
+                payload[field] = {
+                    "value": values[field],
+                    "status": "documented",
+                    "documentation_status": "documented",
+                    "confidence": 0.99,
+                    "explanation": "Direct target-site evidence.",
+                    "evidence": [
+                        {
+                            "evidence_ref": references[field],
+                            "interpretation": "direct",
+                        }
+                    ],
+                }
+            else:
+                payload[field] = {
+                    "value": None,
+                    "status": "requires_probe",
+                    "documentation_status": "silent",
+                    "confidence": 1.0,
+                    "explanation": "Target-site documentation was silent.",
+                    "evidence": [],
+                }
+        return schema.model_validate(payload)
 
 
 class CorrectingArtifactProvider(ArtifactProvider):
-    def extract_report(self, *, system_prompt, user_prompt):
-        report = super().extract_report(
+    def extract_structured(
+        self, *, system_prompt, user_prompt, schema, tool_name
+    ):
+        report = super().extract_structured(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            schema=schema,
+            tool_name=tool_name,
         )
         if self.extraction_calls == 1:
-            report.slurm_policy.scheduler.evidence[0].chunk_id = "partitions:R1"
+            report.scheduler.evidence[0].evidence_ref = "partitions:E1"
         return report
+
+
+class NetworkTimeoutProvider(ArtifactProvider):
+    def extract_structured(
+        self, *, system_prompt, user_prompt, schema, tool_name
+    ):
+        if tool_name == "submit_network_policy":
+            self.extraction_calls += 1
+            raise ProviderError("request timed out")
+        return super().extract_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema=schema,
+            tool_name=tool_name,
+        )
+
+
+class DiscoveryTimeoutProvider(ArtifactProvider):
+    def start_agent(self, *, system_prompt, user_prompt, tools):
+        raise ProviderError("discovery request timed out")
 
 
 def documented(value, field, evidence_map):
@@ -391,7 +449,7 @@ def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
     assert "Search 1/12" in progress
     assert "Waiting for the discovery model" in progress
     assert "Extraction context:" in progress
-    assert "Waiting for structured policy extraction" in progress
+    assert "Extracting site-policy policy in independent groups" in progress
     assert "Built discovery-report and candidate site-policy artifacts" in progress
 
 
@@ -414,5 +472,59 @@ def test_invalid_cross_field_reference_gets_one_same_model_retry(tmp_path):
         allowed_domains=["purdue.edu"],
     )
 
-    assert provider.extraction_calls == 2
+    assert provider.extraction_calls == 3
     assert artifacts.site_policy.scheduler.type == "slurm"
+
+
+def test_group_timeout_still_returns_partial_policy(tmp_path):
+    tools = make_anvil_tools()
+    agent = HPCPolicyScoutAgent(
+        provider=NetworkTimeoutProvider(tools),
+        tools=tools,
+        max_steps=2,
+        log_dir=tmp_path,
+        corpus_dir=tmp_path / "corpus",
+    )
+
+    artifacts = agent.run(
+        site_name="Purdue Anvil",
+        site_id="purdue-anvil",
+        discovery_report_reference="purdue-anvil.discovery-report.json",
+        keywords=["Anvil Slurm", "Anvil networking"],
+        allowed_domains=["purdue.edu"],
+    )
+
+    assert artifacts.site_policy.scheduler.submit_command == "sbatch"
+    assert artifacts.site_policy.network.manager_worker is None
+    assert artifacts.site_policy.profile_state == "partial"
+    assert "manager_worker_connectivity" in (
+        artifacts.discovery_report.extraction.failed_fields
+    )
+    network_finding = artifacts.discovery_report.findings["network.manager_worker"]
+    assert network_finding.value is None
+    assert network_finding.documentation_status == "extraction_failed"
+
+
+def test_discovery_timeout_uses_deterministic_partial_selection(tmp_path):
+    tools = make_anvil_tools()
+    agent = HPCPolicyScoutAgent(
+        provider=DiscoveryTimeoutProvider(tools),
+        tools=tools,
+        max_steps=2,
+        log_dir=tmp_path,
+        corpus_dir=tmp_path / "corpus",
+    )
+
+    artifacts = agent.run(
+        site_name="Purdue Anvil",
+        site_id="purdue-anvil",
+        discovery_report_reference="purdue-anvil.discovery-report.json",
+        keywords=["Anvil Slurm", "Anvil networking"],
+        allowed_domains=["purdue.edu"],
+    )
+
+    assert (
+        artifacts.discovery_report.discovery.termination_reason
+        == "partial_discovery_fallback"
+    )
+    assert artifacts.site_policy.scheduler.submit_command == "sbatch"

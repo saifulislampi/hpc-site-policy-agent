@@ -20,6 +20,7 @@ python main.py \
   --search-budget 12 \
   --page-budget 16 \
   --retrieval-top-k 3 \
+  --extraction-profile site-policy \
   --corpus-dir corpora/purdue-anvil \
   --refresh-corpus
 ```
@@ -37,9 +38,11 @@ CLI configuration
   → bounded discovery-agent selection
   → HTML section and table extraction
   → persistent document/chunk corpus
-  → transient field-specific retrieval
-  → one structured model extraction
-  → local evidence resolution and validation
+  → profile-limited field retrieval
+  → exact literal evidence spans
+  → independent submission and network model extractions
+  → per-field evidence resolution and validation
+  → null fallbacks for unverified fields
   → detailed discovery report
   → compact site policy
 ```
@@ -164,6 +167,11 @@ FAQ, and architecture pages while recording networking ports as unanswered.
 The model is selecting among already classified and fetched evidence. It is not
 allowed to override URL scope or select an unfetched page.
 
+If the discovery model times out, returns no valid tool, or exhausts its steps,
+Python keeps the deterministic crawl results and proceeds with
+`termination_reason=partial_discovery_fallback`. This produces an evaluable
+partial artifact instead of discarding the completed search and fetch work.
+
 ## 7. Extract structured document sections
 
 [`tools.py`](../tools.py) converts fetched HTML into sections with heading paths
@@ -222,10 +230,17 @@ corpora/purdue-anvil/chunks.jsonl
 delete a stored page merely because the current search did not rediscover it.
 There is no persisted retrieval index.
 
-## 9. Retrieve evidence separately for every field
+## 9. Select a profile and retrieve evidence per requested field
 
 [`corpus/retrieval.py`](../corpus/retrieval.py) constructs a temporary in-memory
 BM25 index. Each output field has several query variants.
+
+The default `--extraction-profile site-policy` requests eleven fields needed by
+the compact operational candidate: six submission/scheduler fields and five
+network fields. It does not spend retrieval or model context on secondary
+operational fields. For a broader research run,
+`--extraction-profile evaluation-full` also requests walltime, memory, job size,
+charging, purge, cost traps, and login-node socket policy.
 
 For `partitions`, the variants include concepts such as:
 
@@ -256,50 +271,52 @@ An audit line such as this is therefore meaningful:
 12 sibling chunks retained, 0 sibling chunks retrieved
 ```
 
-## 10. Construct the extraction context
+## 10. Construct exact evidence spans
 
-[`prompts.py`](../prompts.py) groups results by field. Global corpus chunk IDs are
-not shown to the model. Each result receives a field-local reference:
+[`grounding.py`](../grounding.py) divides each retrieved chunk into exact,
+zero-overlap substrings of at most 1,000 characters. Global corpus chunk IDs are
+not shown to the model. Each span receives a field-local reference:
 
 ```text
---- FIELD partitions RETRIEVAL MAP START ---
-EVIDENCE REF: partitions:R1
-GLOBAL CHUNK: G7
-SCORE: 9.42
---- FIELD partitions RETRIEVAL MAP END ---
+--- FIELD partitions EVIDENCE START ---
+EVIDENCE REF: partitions:E4 -> G7:S2 (retrieval score 9.42)
+--- FIELD partitions EVIDENCE END ---
 
---- GLOBAL EVIDENCE LIBRARY START ---
+--- EXACT EVIDENCE SPAN LIBRARY START ---
 --- GLOBAL CHUNK G7 START ---
 URL: https://docs.rcac.purdue.edu/userguides/anvil/jobs/
 HEADING PATH: Job Submission on Anvil > Anvil Queues (Partitions)
-CHUNK TEXT:
+[G7:S2 START]
 | Queue Name | Max Nodes per Job | Max Duration |
 | --- | --- | --- |
 | shared | 1 | 96 hrs |
+[G7:S2 END]
 --- GLOBAL CHUNK G7 END ---
---- GLOBAL EVIDENCE LIBRARY END ---
+--- EXACT EVIDENCE SPAN LIBRARY END ---
 ```
-
-If several fields retrieve the same canonical chunk, each field receives its
-own local reference but the potentially long chunk text appears only once in
-the global evidence library.
 
 Other fields receive independent namespaces such as:
 
 ```text
-submission_options:R1
-default_partition:R1
-walltime_policy:R1
-published_port_range:R1
+submission_options:E1
+default_partition:E1
+published_port_range:E1
 ```
 
-## 11. Request structured extraction
+The model will select an ID. It does not copy the quote or construct provenance.
+This removes the failure mode where a model paraphrases `96:00:00` or changes
+Markdown spacing while trying to cite a chunk.
+
+## 11. Extract independent field groups
 
 [`providers/openai_provider.py`](../providers/openai_provider.py) sends the
-field-grouped context to the single CLI-selected model. The required output is
-validated against [`schemas/extraction.py`](../schemas/extraction.py).
+context to the single CLI-selected model. [`extraction_profiles.py`](../extraction_profiles.py)
+defines the groups. The default makes a submission call and a network call;
+`evaluation-full` adds an operational call. All use the same `--model`.
 
-An illustrative finding returned by the model is:
+Each model response is validated against its smaller provider-neutral schema in
+[`schemas/extraction.py`](../schemas/extraction.py). An illustrative model
+finding is:
 
 ```json
 {
@@ -310,11 +327,7 @@ An illustrative finding returned by the model is:
   "explanation": "The job guide identifies shared as the default partition.",
   "evidence": [
     {
-      "chunk_id": "default_partition:R1",
-      "source_url": "https://docs.rcac.purdue.edu/userguides/anvil/jobs/",
-      "source_title": "Job Submission - RCAC Documentation",
-      "heading": "Default Partition",
-      "quote": "If no partition is specified, the job will be directed into the default partition (`shared`).",
+      "evidence_ref": "default_partition:E1",
       "interpretation": "direct"
     }
   ]
@@ -335,20 +348,38 @@ is an abstention:
 }
 ```
 
-## 12. Resolve and validate evidence locally
+## 12. Resolve, validate, and degrade per field
 
-[`agent.py`](../agent.py) translates `default_partition:R1` into its canonical
-stored chunk ID and fills the canonical URL, title, and heading from the corpus.
+[`agent.py`](../agent.py) translates `default_partition:E1` into its exact span
+and fills the quote, canonical chunk ID, URL, title, and heading from the corpus.
 It then enforces:
 
 ```text
 the reference belongs to the finding's field
 the canonical chunk was retrieved for that field
 the evidence URL matches the chunk URL
-the quote is a literal substring of the chunk text
+the application-selected quote is a literal substring of the chunk text
 documented/conflicting findings have direct evidence
 requires_probe findings have value=null
 ```
+
+If one field selects a reference from another field, the valid fields from that
+group are preserved and only invalid fields receive one correction attempt. If
+the correction fails, or a group request times out, those fields become:
+
+```json
+{
+  "value": null,
+  "status": "requires_probe",
+  "documentation_status": "extraction_failed",
+  "confidence": 0.0,
+  "evidence": []
+}
+```
+
+Fields outside the selected profile are separately marked
+`not_investigated`. Thus model failure, documentation silence, and a field that
+was never requested remain distinguishable during evaluation.
 
 The detailed trace records every retrieved score and whether the chunk was
 cited. This distinguishes “the model abstained after seeing relevant chunks”
@@ -370,6 +401,14 @@ The detailed discovery report contains research and evaluation information:
   "corpus": {
     "corpus_id": "purdue-anvil",
     "corpus_fingerprint": "sha256:..."
+  },
+  "extraction": {
+    "profile": "site-policy",
+    "profile_state": "partial",
+    "documented_fields": 6,
+    "null_fields": 5,
+    "failed_fields": [],
+    "group_errors": {}
   },
   "retrieval": {
     "partitions": {
@@ -404,6 +443,7 @@ evidence:
 
 ```json
 {
+  "profile_state": "partial",
   "site": {
     "id": "purdue-anvil",
     "name": "Purdue Anvil"
@@ -470,6 +510,8 @@ the detailed reproducibility information.
 | Site identity, queries, deterministic scope | [`discovery.py`](../discovery.py) |
 | Search, fetch, HTML sections, coverage | [`tools.py`](../tools.py) |
 | Agent loop and evidence validation | [`agent.py`](../agent.py) |
+| Extraction profiles and groups | [`extraction_profiles.py`](../extraction_profiles.py) |
+| Exact evidence spans | [`grounding.py`](../grounding.py) |
 | Chunk construction | [`corpus/chunking.py`](../corpus/chunking.py) |
 | Persistent corpus merge | [`corpus/store.py`](../corpus/store.py) |
 | Transient BM25 retrieval | [`corpus/retrieval.py`](../corpus/retrieval.py) |
