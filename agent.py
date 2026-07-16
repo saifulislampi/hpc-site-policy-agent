@@ -56,7 +56,7 @@ class HPCPolicyScoutAgent:
         corpus_dir: str | Path = "corpora/default",
         refresh_corpus: bool = False,
         chunk_chars: int = 1800,
-        retrieval_top_k: int = 6,
+        retrieval_top_k: int = 3,
     ) -> None:
         self.provider = provider
         self.tools = tools
@@ -183,11 +183,27 @@ class HPCPolicyScoutAgent:
             unanswered_topics=selection.unanswered_topics,
             discovery_coverage=selection.coverage,
         )
-        self._progress(
-            "Extracting policy report from "
-            f"{sum(len(item.hits) for item in retrievals.values())} "
-            "field-ranked chunks"
+        field_hit_count = sum(len(item.hits) for item in retrievals.values())
+        unique_chunk_count = len(
+            {
+                hit.chunk.chunk_id
+                for retrieval in retrievals.values()
+                for hit in retrieval.hits
+            }
         )
+        self.logger.write(
+            "extraction_context_ready",
+            {
+                "field_hit_count": field_hit_count,
+                "unique_chunk_count": unique_chunk_count,
+                "prompt_characters": len(extraction_input),
+            },
+        )
+        self._progress(
+            f"Extraction context: {unique_chunk_count} unique chunks from "
+            f"{field_hit_count} field references"
+        )
+        self._progress("Waiting for structured policy extraction")
         report: ExtractedPolicy | None = None
         citation_audit: dict[str, Any] | None = None
         validation_error: AgentError | None = None

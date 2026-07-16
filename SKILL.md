@@ -90,8 +90,9 @@ Capability questions such as port reachability, path writability, or worker inte
   allow one same-model correction attempt after validation failure.
 - Preserve complete JSONL traces for reproducibility and evaluation.
 - Add tests for schemas, URL restrictions, duplicate actions, and failure cases.
-- Update `docs/CURRENT_PIPELINE.txt`, output documentation, and this guide with
-  every pipeline or artifact change.
+- Update `docs/CURRENT_PIPELINE.txt`, `docs/working-example.md`, output
+  documentation, and this guide with every pipeline, CLI, schema, retrieval,
+  validation, or artifact change.
 
 ## Current milestone
 

@@ -53,6 +53,7 @@ CLI arguments + environment
        → retain whole Policies/FAQ candidates for those fields
   → one provider structured-extraction call over field-grouped chunks
        → expose field-local references such as partitions:R1
+       → store each unique chunk text once in a global evidence library
        → resolve references to canonical chunk IDs and URLs locally
   → validate every evidence item locally
        → chunk_id belongs to that field's retrieved list

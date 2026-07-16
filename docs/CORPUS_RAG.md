@@ -27,8 +27,10 @@ deduplicates identical content, penalizes navigation fragments, and prevents
 hardware-only tables from serving as scheduler or networking policy evidence.
 
 The extraction prompt uses field-local references such as `partitions:R1`
-instead of exposing reusable global chunk IDs. The application resolves those
-references to canonical chunk provenance, validates literal quotes, and permits
+instead of exposing reusable corpus chunk IDs. Field references map to a
+deduplicated global evidence library, so a chunk shared by several fields is
+included in the prompt only once. The application resolves those references to
+canonical chunk provenance, validates literal quotes, and permits
 one correction attempt with the same CLI-selected model.
 
 `--refresh-corpus` is merge-safe: a rediscovered changed page replaces its old

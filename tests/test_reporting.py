@@ -45,18 +45,28 @@ class ArtifactProvider:
         self.extraction_calls += 1
         self.last_extraction_usage = {"input_tokens": 200, "output_tokens": 100}
         evidence = {}
+        global_chunks = {
+            global_id: (url, title, heading, text)
+            for global_id, url, title, heading, text in re.findall(
+                r"--- GLOBAL CHUNK (G\d+) START ---\nURL: (\S+)\n"
+                r"TITLE: (.*?)\n.*?HEADING PATH: (.*?)\nCHUNK TEXT:\n"
+                r"(.*?)\n--- GLOBAL CHUNK \1 END ---",
+                user_prompt,
+                flags=re.DOTALL,
+            )
+        }
         for field, body in re.findall(
-            r"--- FIELD (\w+) RETRIEVED CHUNKS START ---(.*?)"
-            r"--- FIELD \1 RETRIEVED CHUNKS END ---",
+            r"--- FIELD (\w+) RETRIEVAL MAP START ---(.*?)"
+            r"--- FIELD \1 RETRIEVAL MAP END ---",
             user_prompt,
             flags=re.DOTALL,
         ):
-            chunks = re.findall(
-                r"EVIDENCE REF: (\S+).*?URL: (\S+).*?TITLE: (.*?)\n.*?"
-                r"HEADING PATH: (.*?)\nCHUNK TEXT:\n(.*?)\nEND EVIDENCE \1",
-                body,
-                flags=re.DOTALL,
-            )
+            chunks = [
+                (reference, *global_chunks[global_id])
+                for reference, global_id in re.findall(
+                    r"EVIDENCE REF: (\S+)\nGLOBAL CHUNK: (G\d+)", body
+                )
+            ]
             preferred = next((item for item in chunks if item[1] == JOBS_URL), None)
             chosen = preferred or (chunks[0] if chunks else None)
             if chosen:
@@ -380,7 +390,8 @@ def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
     )
     assert "Search 1/12" in progress
     assert "Waiting for the discovery model" in progress
-    assert "Extracting policy report" in progress
+    assert "Extraction context:" in progress
+    assert "Waiting for structured policy extraction" in progress
     assert "Built discovery-report and candidate site-policy artifacts" in progress
 
 

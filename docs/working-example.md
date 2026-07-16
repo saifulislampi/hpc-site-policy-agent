@@ -19,7 +19,7 @@ python main.py \
   --api-timeout 180 \
   --search-budget 12 \
   --page-budget 16 \
-  --retrieval-top-k 6 \
+  --retrieval-top-k 3 \
   --corpus-dir corpora/purdue-anvil \
   --refresh-corpus
 ```
@@ -262,18 +262,27 @@ An audit line such as this is therefore meaningful:
 not shown to the model. Each result receives a field-local reference:
 
 ```text
---- FIELD partitions RETRIEVED CHUNKS START ---
-
+--- FIELD partitions RETRIEVAL MAP START ---
 EVIDENCE REF: partitions:R1
+GLOBAL CHUNK: G7
+SCORE: 9.42
+--- FIELD partitions RETRIEVAL MAP END ---
+
+--- GLOBAL EVIDENCE LIBRARY START ---
+--- GLOBAL CHUNK G7 START ---
 URL: https://docs.rcac.purdue.edu/userguides/anvil/jobs/
 HEADING PATH: Job Submission on Anvil > Anvil Queues (Partitions)
 CHUNK TEXT:
 | Queue Name | Max Nodes per Job | Max Duration |
 | --- | --- | --- |
 | shared | 1 | 96 hrs |
-
---- FIELD partitions RETRIEVED CHUNKS END ---
+--- GLOBAL CHUNK G7 END ---
+--- GLOBAL EVIDENCE LIBRARY END ---
 ```
+
+If several fields retrieve the same canonical chunk, each field receives its
+own local reference but the potentially long chunk text appears only once in
+the global evidence library.
 
 Other fields receive independent namespaces such as:
 

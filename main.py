@@ -113,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--retrieval-top-k",
         type=int,
-        default=6,
-        help="Maximum chunks retrieved per ordinary policy field; default 6.",
+        default=3,
+        help="Maximum chunks retrieved per ordinary policy field; default 3.",
     )
     parser.add_argument("--log-dir", default="logs")
     parser.add_argument(

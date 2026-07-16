@@ -42,6 +42,7 @@ Rules:
 - Every documented or conflicting claim must include the field-local EVIDENCE REF in its chunk_id field, a short literal quote, and source.
 - The evidence quote must be an exact substring of that cited chunk, including punctuation and spacing.
 - Never copy or invent a global corpus chunk ID. Use only references such as partitions:R1 from the current field.
+- Follow the field's EVIDENCE REF to its GLOBAL CHUNK entry, and copy evidence only from that global entry. A global chunk may be shared by several fields but its text appears only once.
 - Use status=requires_probe and value=null when operational behavior is not documented.
 - Set documentation_status=silent only when deterministic target-site coverage says documentation_silent.
 - Set documentation_status=discovery_failed when deterministic coverage says search_exhausted.
@@ -130,8 +131,16 @@ def build_extraction_input(
         + ("\n".join(f"- {x}" for x in unanswered_topics) or "- none"),
     ]
 
+    global_ids: dict[str, str] = {}
+    global_chunks = []
+    for retrieval in retrievals.values():
+        for hit in retrieval.hits:
+            if hit.chunk.chunk_id not in global_ids:
+                global_ids[hit.chunk.chunk_id] = f"G{len(global_ids) + 1}"
+                global_chunks.append(hit.chunk)
+
     for field, retrieval in retrievals.items():
-        sections.append(f"--- FIELD {field} RETRIEVED CHUNKS START ---")
+        sections.append(f"--- FIELD {field} RETRIEVAL MAP START ---")
         sections.append(f"QUERY: {retrieval.query}")
         if not retrieval.hits:
             sections.append("NO CHUNKS RETRIEVED")
@@ -142,18 +151,31 @@ def build_extraction_input(
                 "\n".join(
                     [
                         f"EVIDENCE REF: {evidence_ref}",
+                        f"GLOBAL CHUNK: {global_ids[chunk.chunk_id]}",
                         f"SCORE: {hit.score}",
-                        f"URL: {chunk.source_url}",
-                        f"TITLE: {chunk.title}",
-                        f"SITE SCOPE: {chunk.site_scope}",
-                        f"TRUST LEVEL: {chunk.trust_level}",
-                        f"HEADING PATH: {' > '.join(chunk.heading_path)}",
-                        "CHUNK TEXT:",
-                        chunk.text,
-                        f"END EVIDENCE {evidence_ref}",
                     ]
                 )
             )
-        sections.append(f"--- FIELD {field} RETRIEVED CHUNKS END ---")
+        sections.append(f"--- FIELD {field} RETRIEVAL MAP END ---")
+
+    sections.append("--- GLOBAL EVIDENCE LIBRARY START ---")
+    for chunk in global_chunks:
+        global_id = global_ids[chunk.chunk_id]
+        sections.append(
+            "\n".join(
+                [
+                    f"--- GLOBAL CHUNK {global_id} START ---",
+                    f"URL: {chunk.source_url}",
+                    f"TITLE: {chunk.title}",
+                    f"SITE SCOPE: {chunk.site_scope}",
+                    f"TRUST LEVEL: {chunk.trust_level}",
+                    f"HEADING PATH: {' > '.join(chunk.heading_path)}",
+                    "CHUNK TEXT:",
+                    chunk.text,
+                    f"--- GLOBAL CHUNK {global_id} END ---",
+                ]
+            )
+        )
+    sections.append("--- GLOBAL EVIDENCE LIBRARY END ---")
 
     return "\n\n".join(sections)

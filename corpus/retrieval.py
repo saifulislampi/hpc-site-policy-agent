@@ -162,7 +162,7 @@ class LexicalRetriever:
             if score > 0:
                 ranked.append((score, chunk))
         ranked.sort(key=lambda item: (item[0], item[1].chunk_id), reverse=True)
-        limit = max(top_k, 8) if field in WHOLE_SECTION_FIELDS else top_k
+        limit = max(top_k, 4) if field in WHOLE_SECTION_FIELDS else top_k
         return FieldRetrieval(
             field=field,
             query=query,

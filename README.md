@@ -98,7 +98,7 @@ Useful options:
 --corpus-dir DIR          Persistent canonical documents/chunks directory
 --refresh-corpus          Replace changed rediscovered pages; retain unseen pages
 --chunk-chars N           Ordinary text chunk limit; default 1800
---retrieval-top-k N       Chunks per ordinary extraction field; default 6
+--retrieval-top-k N       Chunks per ordinary extraction field; default 3
 --site-alias NAME        Additional target-site alias; repeatable
 --preferred-path-token T Target-site URL path token; repeatable
 --exclude-site-token T   Sibling-site token to reject; repeatable
