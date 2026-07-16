@@ -112,6 +112,49 @@ def test_sibling_chunks_are_retained_but_excluded_before_ranking():
     assert all(hit.chunk.site_scope != "sibling" for hit in retrieval.hits)
 
 
+def test_hardware_table_is_not_a_partition_candidate():
+    hardware = make_document(
+        heading="Anvil Specifications",
+        blocks=[
+            DocumentBlock(
+                kind="table",
+                text=(
+                    "| Sub-Cluster | Number of Nodes | Cores per Node | Memory |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| G | 16 | 128 | 512 GB |"
+                ),
+            )
+        ],
+    )
+    queues = make_document(
+        "https://docs.example.edu/hpc/anvil/jobs/queues/",
+        heading="Slurm Queues (Partitions)",
+        blocks=[
+            DocumentBlock(
+                kind="table",
+                text=(
+                    "| Queue Name | Max Nodes | Max Duration |\n"
+                    "| --- | --- | --- |\n"
+                    "| shared | 1 | 96 hrs |"
+                ),
+            )
+        ],
+    )
+    _, chunks = build_corpus_records(
+        [hardware, queues], maximum_chars=500, fetched_at=NOW
+    )
+
+    retrieval = LexicalRetriever(chunks).retrieve(
+        field="partitions",
+        query="Slurm partitions queues limits",
+        allowed_scopes={"target_site"},
+        top_k=5,
+    )
+
+    assert any("Queue Name" in hit.chunk.text for hit in retrieval.hits)
+    assert all("Sub-Cluster" not in hit.chunk.text for hit in retrieval.hits)
+
+
 def test_refresh_preserves_pages_not_rediscovered(tmp_path):
     identity = derive_site_identity(
         display_name="Example Anvil", organization_domains=["example.edu"]

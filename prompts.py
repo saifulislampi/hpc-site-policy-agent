@@ -39,9 +39,9 @@ You extract a structured HPC policy report from field-specific retrieved chunks.
 
 Rules:
 - Use only chunks retrieved for the field being populated.
-- Every documented or conflicting claim must include its chunk_id, a short literal quote, and source.
+- Every documented or conflicting claim must include the field-local EVIDENCE REF in its chunk_id field, a short literal quote, and source.
 - The evidence quote must be an exact substring of that cited chunk, including punctuation and spacing.
-- Never cite a chunk under a field unless it appears in that field's RETRIEVED CHUNKS section.
+- Never copy or invent a global corpus chunk ID. Use only references such as partitions:R1 from the current field.
 - Use status=requires_probe and value=null when operational behavior is not documented.
 - Set documentation_status=silent only when deterministic target-site coverage says documentation_silent.
 - Set documentation_status=discovery_failed when deterministic coverage says search_exhausted.
@@ -62,14 +62,14 @@ Rules:
 - Preserve a documented example separately from value. An example account is not the user's account value.
 - Set value only for an explicitly documented site-wide default or fixed value; otherwise use null.
 - Do not duplicate partition choices inside submission options; partition names belong in the partitions finding.
-- Do not add standard Slurm options or syntax that are absent from the selected documents.
+- Do not add standard Slurm options or syntax that are absent from the retrieved chunks.
 - Set default_partition only when directly documented for the target site.
 - Represent each documented partition with its name and only explicitly stated limits.
 - Connectivity values must be allowed, blocked, or conditional; otherwise use requires_probe and null.
 - A published port range must include protocol plus integer start and end ports.
 - Include the nearest section heading with each evidence quote when it is available.
 - Extract charging_model, purge_policy, and cost_traps independently. Policies and FAQ chunks may contain relevant facts that do not share the query's exact keywords.
-- Evidence URLs and chunk IDs must exactly match the supplied chunk metadata.
+- Copy the URL shown with the cited EVIDENCE REF; the application will resolve the reference to canonical chunk provenance.
 - Call submit_policy_report exactly once with the complete report.
 """.strip()
 
@@ -135,12 +135,13 @@ def build_extraction_input(
         sections.append(f"QUERY: {retrieval.query}")
         if not retrieval.hits:
             sections.append("NO CHUNKS RETRIEVED")
-        for hit in retrieval.hits:
+        for index, hit in enumerate(retrieval.hits, start=1):
             chunk = hit.chunk
+            evidence_ref = f"{field}:R{index}"
             sections.append(
                 "\n".join(
                     [
-                        f"CHUNK ID: {chunk.chunk_id}",
+                        f"EVIDENCE REF: {evidence_ref}",
                         f"SCORE: {hit.score}",
                         f"URL: {chunk.source_url}",
                         f"TITLE: {chunk.title}",
@@ -149,7 +150,7 @@ def build_extraction_input(
                         f"HEADING PATH: {' > '.join(chunk.heading_path)}",
                         "CHUNK TEXT:",
                         chunk.text,
-                        f"END CHUNK {chunk.chunk_id}",
+                        f"END EVIDENCE {evidence_ref}",
                     ]
                 )
             )

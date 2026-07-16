@@ -32,8 +32,10 @@ main.py
 Discovery begins with deterministic canonical-root searches, candidate ranking,
 and topic-link crawling. Scope is assigned from URL paths, independently from
 trust. Sibling pages are retained as negative-control chunks, but scope filters
-exclude them before retrieval scoring. Extraction is a separate constrained
-model call over field-specific retrieved chunks.
+exclude them before retrieval scoring. Multiple topic candidates and query
+variants provide breadth; content deduplication and field-aware guards control
+noise. Extraction is a separate constrained model call over field-specific
+retrieved chunks using field-local evidence references.
 
 ## Trust boundary
 
@@ -84,6 +86,8 @@ Capability questions such as port reachability, path writability, or worker inte
   retrieval parameter, not merely descriptive metadata.
 - Retain stored pages that a refresh run does not rediscover.
 - Log retrieval scores and retrieved-but-uncited chunks.
+- Resolve field-local evidence references to canonical provenance locally, and
+  allow one same-model correction attempt after validation failure.
 - Preserve complete JSONL traces for reproducibility and evaluation.
 - Add tests for schemas, URL restrictions, duplicate actions, and failure cases.
 - Update `docs/CURRENT_PIPELINE.txt`, output documentation, and this guide with

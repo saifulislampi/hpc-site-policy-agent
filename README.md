@@ -7,6 +7,9 @@ the pipeline changes.
 The persistent-corpus and retrieval rules are explained in
 [`docs/CORPUS_RAG.md`](docs/CORPUS_RAG.md).
 
+A complete Purdue run is illustrated in
+[`docs/working-example.md`](docs/working-example.md).
+
 The two output contracts are described in
 [`docs/OUTPUT_ARTIFACTS.md`](docs/OUTPUT_ARTIFACTS.md), and the Claude/Gemini
 adapter plan is in [`docs/PROVIDER_ADAPTERS.md`](docs/PROVIDER_ADAPTERS.md).
@@ -28,6 +31,11 @@ Markdown, Policies/FAQ sections stay whole, and ordinary chunks use zero
 overlap. A transient CPU-only BM25 index retrieves evidence independently for
 each output field; no vector database, embeddings, GPU, or new Python package is
 required.
+
+Each field uses multiple high-recall queries followed by local deduplication and
+noise guards. Extraction cites field-local references, which are resolved to
+canonical chunk IDs by the application. A failed evidence validation receives
+one bounded correction attempt using the same `--model`.
 
 The agent only discovers documentation. It does not execute shell commands, submit jobs, scan ports, or modify an HPC system. Operational facts must later be verified by deterministic probes.
 
@@ -84,13 +92,13 @@ Useful options:
 --api-max-retries N      Transient model-request retries; default 0
 --max-steps N            Maximum discovery-agent turns; default 10
 --search-results N       Approved search results returned per query
---search-budget N        Maximum deterministic search requests; default 8
---page-budget N          Maximum uncached page requests; default 8
+--search-budget N        Maximum deterministic search requests; default 12
+--page-budget N          Maximum uncached page requests; default 16
 --max-page-chars N       Maximum extracted characters per page
 --corpus-dir DIR          Persistent canonical documents/chunks directory
 --refresh-corpus          Replace changed rediscovered pages; retain unseen pages
 --chunk-chars N           Ordinary text chunk limit; default 1800
---retrieval-top-k N       Chunks per ordinary extraction field; default 5
+--retrieval-top-k N       Chunks per ordinary extraction field; default 6
 --site-alias NAME        Additional target-site alias; repeatable
 --preferred-path-token T Target-site URL path token; repeatable
 --exclude-site-token T   Sibling-site token to reject; repeatable

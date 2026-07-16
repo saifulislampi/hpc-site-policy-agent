@@ -25,6 +25,7 @@ from schemas import (
     DiscoverySelection,
     ExtractedPolicy,
     FieldRetrieval,
+    DocumentSource,
 )
 from tools import ScoutTools
 
@@ -55,7 +56,7 @@ class HPCPolicyScoutAgent:
         corpus_dir: str | Path = "corpora/default",
         refresh_corpus: bool = False,
         chunk_chars: int = 1800,
-        retrieval_top_k: int = 5,
+        retrieval_top_k: int = 6,
     ) -> None:
         self.provider = provider
         self.tools = tools
@@ -69,6 +70,9 @@ class HPCPolicyScoutAgent:
         self._model_requests = 0
         self._discovery_input_tokens = 0
         self._discovery_output_tokens = 0
+        self._extraction_requests = 0
+        self._extraction_input_tokens = 0
+        self._extraction_output_tokens = 0
         self._started_at = time.monotonic()
         if hasattr(self.tools, "set_event_callback"):
             self.tools.set_event_callback(self._record_tool_event)
@@ -184,12 +188,42 @@ class HPCPolicyScoutAgent:
             f"{sum(len(item.hits) for item in retrievals.values())} "
             "field-ranked chunks"
         )
-        report = self.provider.extract_report(
-            system_prompt=EXTRACTION_SYSTEM_PROMPT,
-            user_prompt=extraction_input,
-        )
-        report.discovery_coverage = selection.coverage
-        citation_audit = self._validate_report_evidence(report, retrievals)
+        report: ExtractedPolicy | None = None
+        citation_audit: dict[str, Any] | None = None
+        validation_error: AgentError | None = None
+        for extraction_attempt in (1, 2):
+            user_prompt = extraction_input
+            if validation_error is not None:
+                user_prompt += (
+                    "\n\nCORRECTION REQUIRED\n"
+                    "The previous complete report failed local validation:\n"
+                    f"{validation_error}\n"
+                    "Return a complete corrected report. For every evidence item, "
+                    "use only the EVIDENCE REF shown inside that same field and "
+                    "copy an exact quote from its text. Abstain when no field-local "
+                    "evidence supports a value."
+                )
+                self._progress("Retrying extraction after evidence validation failure")
+            report = self.provider.extract_report(
+                system_prompt=EXTRACTION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+            )
+            self._record_extraction_usage()
+            report.discovery_coverage = selection.coverage
+            try:
+                self._resolve_evidence_references(report, retrievals)
+                citation_audit = self._validate_report_evidence(report, retrievals)
+                break
+            except AgentError as exc:
+                validation_error = exc
+                self.logger.write(
+                    "extraction_validation_failed",
+                    {"attempt": extraction_attempt, "error": str(exc)},
+                )
+                if extraction_attempt == 2:
+                    raise
+        if report is None or citation_audit is None:
+            raise AgentError("Extraction did not produce a validated report.")
         self.logger.write("retrieval_citation_audit", citation_audit)
         self._progress("Structured extraction completed")
 
@@ -289,6 +323,40 @@ class HPCPolicyScoutAgent:
             )
 
         raise AgentError(f"Discovery exceeded the maximum of {self.max_steps} steps.")
+
+    @staticmethod
+    def _resolve_evidence_references(
+        report: ExtractedPolicy,
+        retrievals: dict[str, FieldRetrieval],
+    ) -> None:
+        cited_chunks: dict[str, Any] = {}
+        for policy in (report.slurm_policy, report.network_policy):
+            for field, finding in policy.__dict__.items():
+                references = {
+                    f"{field}:R{index}": hit.chunk
+                    for index, hit in enumerate(retrievals[field].hits, start=1)
+                }
+                for evidence in finding.evidence:
+                    chunk = references.get(evidence.chunk_id)
+                    if chunk is None:
+                        raise AgentError(
+                            f"Evidence for {field} used invalid field-local reference "
+                            f"{evidence.chunk_id}."
+                        )
+                    evidence.chunk_id = chunk.chunk_id
+                    evidence.source_url = chunk.source_url
+                    evidence.source_title = chunk.title
+                    evidence.heading = " > ".join(chunk.heading_path)
+                    cited_chunks[str(chunk.source_url)] = chunk
+        report.sources = [
+            DocumentSource(
+                url=chunk.source_url,
+                title=chunk.title,
+                authority="official",
+                relevance="Cited by validated field-local evidence.",
+            )
+            for chunk in cited_chunks.values()
+        ]
 
     @staticmethod
     def _validate_report_evidence(
@@ -401,6 +469,11 @@ class HPCPolicyScoutAgent:
             self._progress(
                 f"Retaining sibling negative-control page: {payload.get('url')}"
             )
+        elif event == "topic_mismatch":
+            self._progress(
+                f"Fetched page did not establish {payload.get('topic')}; "
+                "trying another candidate"
+            )
         elif event == "coverage":
             submission = payload.get("submission_policy", {}).get("status")
             networking = payload.get("networking_policy", {}).get("status")
@@ -428,16 +501,13 @@ class HPCPolicyScoutAgent:
             if hasattr(self.tools, "discovery_metrics")
             else {}
         )
-        extraction_usage = (
-            getattr(self.provider, "last_extraction_usage", {})
-            if extraction_complete
-            else {}
-        )
-        extraction_input = extraction_usage.get("input_tokens") or 0
-        extraction_output = extraction_usage.get("output_tokens") or 0
+        extraction_input = self._extraction_input_tokens if extraction_complete else 0
+        extraction_output = self._extraction_output_tokens if extraction_complete else 0
         return {
             **tool_metrics,
-            "model_requests": self._model_requests + int(extraction_complete),
+            "model_requests": self._model_requests + (
+                self._extraction_requests if extraction_complete else 0
+            ),
             "discovery_input_tokens": self._discovery_input_tokens,
             "discovery_output_tokens": self._discovery_output_tokens,
             "extraction_input_tokens": extraction_input,
@@ -446,6 +516,12 @@ class HPCPolicyScoutAgent:
             "total_output_tokens": self._discovery_output_tokens + extraction_output,
             "termination_reason": selection.termination_reason,
         }
+
+    def _record_extraction_usage(self) -> None:
+        self._extraction_requests += 1
+        usage = getattr(self.provider, "last_extraction_usage", {})
+        self._extraction_input_tokens += usage.get("input_tokens") or 0
+        self._extraction_output_tokens += usage.get("output_tokens") or 0
 
     @staticmethod
     def _summarize_tool_output(output: dict[str, Any]) -> dict[str, Any]:

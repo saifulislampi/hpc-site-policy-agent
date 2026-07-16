@@ -20,6 +20,17 @@ limit. Policies and FAQ sections also remain whole so charging, purge, and cost
 cautions survive even when they do not match obvious keywords. All other chunks
 have zero overlap so a quoted substring maps to exactly one stored chunk.
 
+Discovery fetches several pages per topic, including a separate FAQ,
+charging/accounting, purge, retention, and storage-policy lane, and continues
+past failed or topic-mismatched candidates. Retrieval uses multiple query variants per field,
+deduplicates identical content, penalizes navigation fragments, and prevents
+hardware-only tables from serving as scheduler or networking policy evidence.
+
+The extraction prompt uses field-local references such as `partitions:R1`
+instead of exposing reusable global chunk IDs. The application resolves those
+references to canonical chunk provenance, validates literal quotes, and permits
+one correction attempt with the same CLI-selected model.
+
 `--refresh-corpus` is merge-safe: a rediscovered changed page replaces its old
 version, but a stored web page is never deleted merely because the current
 search did not rediscover it. Without refresh, a changed fetched representation

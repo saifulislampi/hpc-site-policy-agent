@@ -50,6 +50,21 @@ TOPIC_TERMS: dict[TopicName, frozenset[str]] = {
 }
 
 ROOT_TERMS = frozenset({"user", "guide", "documentation", "docs", "overview"})
+POLICY_TERMS = frozenset(
+    {
+        "accounting",
+        "charging",
+        "cost",
+        "faq",
+        "faqs",
+        "policy",
+        "policies",
+        "purge",
+        "retention",
+        "scratch",
+        "storage",
+    }
+)
 PATH_SCOPE_MARKERS = frozenset(
     {"knowledge", "userguides", "clusters", "systems", "hpc"}
 )
@@ -233,6 +248,10 @@ def generate_discovery_queries(identity: SiteIdentity) -> dict[str, list[str]]:
             f"{alias} compute login node network firewall TCP ports{site_filter}",
             f"{alias} worker networking outbound compute nodes{site_filter}",
         ],
+        "operational_policy": [
+            f"{alias} policies FAQ charging accounting service units{site_filter}",
+            f"{alias} scratch purge retention storage policy{site_filter}",
+        ],
     }
 
 
@@ -254,6 +273,11 @@ def topic_matches(value: str, topic: TopicName) -> int:
 def root_matches(value: str) -> int:
     tokens = set(re.findall(r"[a-z0-9]+", value.lower()))
     return len(tokens & ROOT_TERMS)
+
+
+def policy_matches(value: str) -> int:
+    tokens = set(re.findall(r"[a-z0-9]+", value.lower()))
+    return len(tokens & POLICY_TERMS)
 
 
 def _dedupe(values: list[str]) -> list[str]:

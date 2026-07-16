@@ -179,6 +179,56 @@ def test_model_query_without_alias_is_repaired():
     assert "anvil" in seen[0].lower()
 
 
+def test_job_url_and_title_outrank_noisy_access_snippet():
+    identity = derive_site_identity(
+        display_name="Purdue Anvil",
+        organization_domains=["purdue.edu"],
+    )
+    fetched = []
+    results = [
+        {
+            "title": "Access to Anvil",
+            "url": "https://docs.rcac.purdue.edu/userguides/anvil/access/",
+            "snippet": (
+                "Slurm sbatch job submission account partition nodes tasks "
+                "memory walltime queue"
+            ),
+        },
+        {
+            "title": "Job Submission - RCAC Documentation",
+            "url": "https://docs.rcac.purdue.edu/userguides/anvil/jobs/",
+            "snippet": "Submit jobs on Anvil.",
+        },
+    ]
+    pages = {
+        results[0]["url"]: "<article><h1>Access to Anvil</h1><p>Request an account.</p></article>",
+        results[1]["url"]: (
+            "<article><h1>Job Submission on Anvil</h1>"
+            "<p>Create a job submission script and use sbatch.</p></article>"
+        ),
+    }
+    tools = ScoutTools(
+        allowed_domains=["purdue.edu"],
+        site_identity=identity,
+        search_backend=lambda query, limit: results,
+        page_backend=lambda url: fetched.append(url) or {
+            "url": url,
+            "content_type": "text/html",
+            "text": pages[url],
+        },
+    )
+    tools._ranked_search(
+        "Anvil Slurm submitting jobs account partition",
+        objective="submission_policy",
+        generated=True,
+    )
+
+    tools._fetch_topic_candidates("submission_policy", limit=1)
+
+    assert fetched[0] == results[1]["url"]
+    assert results[1]["url"] in tools.documents
+
+
 def test_documentation_silence_differs_from_discovery_failure():
     complete = make_anvil_tools()
     complete.bootstrap_discovery(keywords=[])

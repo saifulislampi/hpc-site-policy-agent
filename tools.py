@@ -21,6 +21,7 @@ from discovery import (
     classify_source,
     derive_site_identity,
     generate_discovery_queries,
+    policy_matches,
     repair_query,
     root_matches,
     topic_matches,
@@ -82,7 +83,7 @@ class ScoutTools:
         site_identity: SiteIdentity | None = None,
         search_results: int = 8,
         max_page_chars: int = 20_000,
-        search_budget: int = 8,
+        search_budget: int = 12,
         page_budget: int = 8,
         search_backend: SearchBackend | None = None,
         page_backend: PageBackend | None = None,
@@ -110,6 +111,7 @@ class ScoutTools:
         self.query_log: list[dict[str, Any]] = []
         self.links_followed: list[str] = []
         self.selected_urls: set[str] = set()
+        self._attempted_urls: set[str] = set()
         self._searches_used = 0
         self._pages_used = 0
         self._topic_queries: dict[TopicName, int] = {
@@ -191,7 +193,18 @@ class ScoutTools:
                     objective=objective,
                     generated=True,
                 )
-            self._fetch_best_topic_candidate(objective)
+            self._fetch_topic_candidates(
+                objective,
+                limit=3 if objective == "submission_policy" else 2,
+            )
+
+        for query in queries["operational_policy"]:
+            self._ranked_search(
+                query,
+                objective="operational_policy",
+                generated=True,
+            )
+        self._fetch_policy_candidates(limit=3)
 
         for keyword in keywords:
             if self._searches_used >= self.search_budget:
@@ -199,7 +212,7 @@ class ScoutTools:
             topic = self._infer_topic(keyword)
             self._ranked_search(keyword, objective=topic, generated=False)
             if topic is not None:
-                self._fetch_best_topic_candidate(topic)
+                self._fetch_topic_candidates(topic, limit=1)
 
         self._fetch_sibling_control()
 
@@ -496,6 +509,13 @@ class ScoutTools:
             }
         if url in self.documents:
             return self._document_tool_output(self.documents[url], cached=True)
+        if url in self._attempted_urls:
+            return {
+                "ok": False,
+                "url": url,
+                "error": "URL was already attempted during this run.",
+                "cached": True,
+            }
         if self._pages_used >= self.page_budget:
             return {
                 "ok": False,
@@ -504,6 +524,7 @@ class ScoutTools:
             }
 
         self._pages_used += 1
+        self._attempted_urls.add(url)
         try:
             raw_page = self._page_backend(url)
         except httpx.HTTPError as exc:
@@ -788,7 +809,9 @@ class ScoutTools:
             if result.get("ok"):
                 per_topic[topic] += 1
 
-    def _fetch_best_topic_candidate(self, topic: TopicName) -> None:
+    def _fetch_topic_candidates(self, topic: TopicName, *, limit: int) -> None:
+        """Fetch several strong pages, continuing past topic-mismatched results."""
+
         candidates = [
             item
             for item in self.candidates.values()
@@ -799,11 +822,61 @@ class ScoutTools:
             )
             and str(item.url) not in self.documents
             and str(item.url) not in self.rejected_documents
+            and str(item.url) not in self._attempted_urls
         ]
-        if not candidates or self._pages_used >= self.page_budget:
-            return
-        candidate = max(candidates, key=lambda item: self._candidate_rank(item, topic))
-        self._fetch_page({"url": str(candidate.url)})
+        candidates.sort(
+            key=lambda item: self._candidate_rank(item, topic), reverse=True
+        )
+        supported = 0
+        attempts = 0
+        maximum_attempts = max(limit * 2, limit)
+        for candidate in candidates:
+            if (
+                supported >= limit
+                or attempts >= maximum_attempts
+                or self._pages_used >= self.page_budget
+            ):
+                break
+            attempts += 1
+            result = self._fetch_page({"url": str(candidate.url)})
+            if not result.get("ok"):
+                continue
+            document = self.documents.get(str(result.get("url")))
+            if document is not None and self._document_supports_topic(document, topic):
+                supported += 1
+            else:
+                self._emit(
+                    "topic_mismatch",
+                    {
+                        "requested_url": str(candidate.url),
+                        "final_url": result.get("url"),
+                        "topic": topic,
+                    },
+                )
+
+    def _fetch_policy_candidates(self, *, limit: int) -> None:
+        candidates = [
+            item
+            for item in self.candidates.values()
+            if item.classification.site_scope == "target_site"
+            and policy_matches(
+                f"{item.title} {item.snippet} {urlparse(str(item.url)).path}"
+            )
+            and str(item.url) not in self.documents
+            and str(item.url) not in self.rejected_documents
+            and str(item.url) not in self._attempted_urls
+        ]
+        candidates.sort(
+            key=lambda item: self._candidate_rank(item, "operational_policy"),
+            reverse=True,
+        )
+        fetched = 0
+        for candidate in candidates:
+            if fetched >= limit or self._pages_used >= self.page_budget:
+                break
+            result = self._fetch_page({"url": str(candidate.url)})
+            if result.get("ok"):
+                fetched += 1
 
     def _fetch_sibling_control(self) -> None:
         """Retain one sibling page so retrieval exclusion is measurable."""
@@ -847,31 +920,40 @@ class ScoutTools:
             if topic_matches(searchable, topic):
                 self._topic_pages[topic].add(str(document.url))
 
-        submission_signals = (
-            "sbatch",
-            "job submission",
-            "submit a job",
-            "--account",
-            "--partition",
-            "wall time",
-            "walltime",
-        )
-        if any(signal in searchable for signal in submission_signals):
+        if self._document_supports_topic(document, "submission_policy"):
             self._topic_evidence["submission_policy"].add(str(document.url))
 
-        network_policy_signals = (
+        if self._document_supports_topic(document, "networking_policy"):
+            self._topic_evidence["networking_policy"].add(str(document.url))
+
+    @staticmethod
+    def _document_supports_topic(
+        document: FetchedDocument,
+        topic: TopicName,
+    ) -> bool:
+        searchable = f"{document.title}\n{document.text}".lower()
+        if topic == "submission_policy":
+            signals = (
+                "#sbatch",
+                " sbatch ",
+                "--partition",
+                "mandatory sbatch",
+                "submit work to a slurm",
+                "job submission script",
+                "queues (partitions)",
+            )
+            return any(signal in searchable for signal in signals)
+        signals = (
             "firewall",
             "tcp port",
             "port range",
             "outbound network",
             "network egress",
             "socket policy",
-            "connectivity policy",
             "compute-to-compute",
             "compute to compute",
         )
-        if any(signal in searchable for signal in network_policy_signals):
-            self._topic_evidence["networking_policy"].add(str(document.url))
+        return any(signal in searchable for signal in signals)
 
     def _topic_coverage(self, topic: TopicName) -> TopicCoverage:
         pages = self._topic_pages[topic]
@@ -911,15 +993,16 @@ class ScoutTools:
         candidate: CandidateSource,
         objective: str | TopicName | None,
     ) -> float:
-        value = (
-            f"{candidate.title} {candidate.snippet} "
-            f"{urlparse(str(candidate.url)).path}"
-        )
+        value = f"{candidate.title} {urlparse(str(candidate.url)).path}"
         rank = candidate.classification.score
         if objective == "canonical_root":
             rank += 4 * root_matches(value)
         elif objective in {"submission_policy", "networking_policy"}:
-            rank += 3 * topic_matches(value, objective)
+            rank += 5 * topic_matches(value, objective)
+            rank += 0.5 * topic_matches(candidate.snippet, objective)
+        elif objective == "operational_policy":
+            rank += 5 * policy_matches(value)
+            rank += 0.5 * policy_matches(candidate.snippet)
         return rank
 
     def _ranked_candidates(self, *, eligible_only: bool) -> list[CandidateSource]:
@@ -1033,7 +1116,7 @@ class ScoutTools:
         soup: BeautifulSoup,
         base_url: str,
     ) -> list[DocumentSection]:
-        content = soup.find("main") or soup.find("article") or soup.body or soup
+        content = soup.find("article") or soup.find("main") or soup.body or soup
         elements = content.find_all(
             ["h1", "h2", "h3", "h4", "p", "pre", "li", "table"]
         )

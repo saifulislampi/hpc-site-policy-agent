@@ -85,14 +85,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--search-budget",
         type=int,
-        default=8,
-        help="Maximum deterministic web-search requests; default 8.",
+        default=12,
+        help="Maximum deterministic web-search requests; default 12.",
     )
     parser.add_argument(
         "--page-budget",
         type=int,
-        default=8,
-        help="Maximum uncached page-fetch requests; default 8.",
+        default=16,
+        help="Maximum uncached page-fetch requests; default 16.",
     )
     parser.add_argument("--max-page-chars", type=int, default=20_000)
     parser.add_argument(
@@ -113,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--retrieval-top-k",
         type=int,
-        default=5,
-        help="Maximum chunks retrieved per ordinary policy field.",
+        default=6,
+        help="Maximum chunks retrieved per ordinary policy field; default 6.",
     )
     parser.add_argument("--log-dir", default="logs")
     parser.add_argument(

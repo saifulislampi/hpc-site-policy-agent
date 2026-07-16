@@ -18,6 +18,7 @@ class ArtifactProvider:
 
     def __init__(self, tools):
         self.tools = tools
+        self.extraction_calls = 0
 
     def start_agent(self, *, system_prompt, user_prompt, tools):
         return ModelTurn(
@@ -41,6 +42,7 @@ class ArtifactProvider:
         raise AssertionError("The mocked run should finish in one model turn.")
 
     def extract_report(self, *, system_prompt, user_prompt):
+        self.extraction_calls += 1
         self.last_extraction_usage = {"input_tokens": 200, "output_tokens": 100}
         evidence = {}
         for field, body in re.findall(
@@ -50,8 +52,8 @@ class ArtifactProvider:
             flags=re.DOTALL,
         ):
             chunks = re.findall(
-                r"CHUNK ID: (\S+).*?URL: (\S+).*?TITLE: (.*?)\n.*?"
-                r"HEADING PATH: (.*?)\nCHUNK TEXT:\n(.*?)\nEND CHUNK \1",
+                r"EVIDENCE REF: (\S+).*?URL: (\S+).*?TITLE: (.*?)\n.*?"
+                r"HEADING PATH: (.*?)\nCHUNK TEXT:\n(.*?)\nEND EVIDENCE \1",
                 body,
                 flags=re.DOTALL,
             )
@@ -60,6 +62,17 @@ class ArtifactProvider:
             if chosen:
                 evidence[field] = chosen
         return make_extracted_policy(self.tools, evidence)
+
+
+class CorrectingArtifactProvider(ArtifactProvider):
+    def extract_report(self, *, system_prompt, user_prompt):
+        report = super().extract_report(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+        if self.extraction_calls == 1:
+            report.slurm_policy.scheduler.evidence[0].chunk_id = "partitions:R1"
+        return report
 
 
 def documented(value, field, evidence_map):
@@ -360,7 +373,35 @@ def test_mocked_full_run_builds_artifacts_and_prints_progress(tmp_path, capsys):
         for chunk in retrieval.chunks
     )
     assert artifacts.site_policy.provenance.corpus_fingerprint.startswith("sha256:")
-    assert "Search 1/8" in progress
+    assert all(
+        ":R" not in evidence.chunk_id
+        for finding in artifacts.discovery_report.findings.values()
+        for evidence in finding.evidence
+    )
+    assert "Search 1/12" in progress
     assert "Waiting for the discovery model" in progress
     assert "Extracting policy report" in progress
     assert "Built discovery-report and candidate site-policy artifacts" in progress
+
+
+def test_invalid_cross_field_reference_gets_one_same_model_retry(tmp_path):
+    tools = make_anvil_tools()
+    provider = CorrectingArtifactProvider(tools)
+    agent = HPCPolicyScoutAgent(
+        provider=provider,
+        tools=tools,
+        max_steps=2,
+        log_dir=tmp_path,
+        corpus_dir=tmp_path / "corpus",
+    )
+
+    artifacts = agent.run(
+        site_name="Purdue Anvil",
+        site_id="purdue-anvil",
+        discovery_report_reference="purdue-anvil.discovery-report.json",
+        keywords=["Anvil Slurm", "Anvil networking"],
+        allowed_domains=["purdue.edu"],
+    )
+
+    assert provider.extraction_calls == 2
+    assert artifacts.site_policy.scheduler.type == "slurm"

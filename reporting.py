@@ -80,7 +80,11 @@ def build_run_artifacts(
         for retrieval in retrievals.values()
         for hit in retrieval.hits
     }
-    sources, source_ids = _build_sources(tools, retrieved_urls)
+    sources, source_ids = _build_sources(
+        tools,
+        retrieved_urls,
+        corpus_snapshot.documents,
+    )
     findings = _build_findings(extracted, source_ids)
     coverage = ArtifactCoverage(
         submission=_coverage_status(extracted.discovery_coverage.submission_policy.status),
@@ -145,6 +149,7 @@ def build_run_artifacts(
 def _build_sources(
     tools: Any,
     retrieved_urls: set[str],
+    corpus_documents: list[Any],
 ) -> tuple[list[ReportSource], dict[str, str]]:
     candidates = list(getattr(tools, "candidates", {}).values())
     candidates.sort(
@@ -156,17 +161,15 @@ def _build_sources(
     )
     sources: list[ReportSource] = []
     source_ids: dict[str, str] = {}
-    for index, candidate in enumerate(candidates, start=1):
+    for candidate in candidates:
         url = str(candidate.url)
-        source_id = f"S{index}"
-        source_ids[url] = source_id
         document = getattr(tools, "documents", {}).get(url) or getattr(
             tools, "rejected_documents", {}
         ).get(url)
         title = document.title if document is not None else candidate.title
         sources.append(
             ReportSource(
-                id=source_id,
+                id="pending",
                 url=url,
                 title=title or url,
                 site_scope=candidate.classification.site_scope,
@@ -176,6 +179,28 @@ def _build_sources(
                 rejection_reason=candidate.rejection_reason,
             )
         )
+    known_urls = {str(source.url) for source in sources}
+    for document in corpus_documents:
+        url = str(document.source_url)
+        if url in known_urls:
+            continue
+        sources.append(
+            ReportSource(
+                id="pending",
+                url=url,
+                title=document.title,
+                site_scope=document.site_scope,
+                trust_level=document.trust_level,
+                selected=False,
+                retrieved=url in retrieved_urls,
+                rejection_reason=(
+                    "Retained corpus source was not rediscovered in this run."
+                ),
+            )
+        )
+    for index, source in enumerate(sources, start=1):
+        source.id = f"S{index}"
+        source_ids[str(source.url)] = source.id
     return sources, source_ids
 
 

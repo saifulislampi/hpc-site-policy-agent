@@ -3,6 +3,9 @@ HPC SITE POLICY AGENT — CURRENT PIPELINE
 CLI arguments + environment
   → derive provider-neutral site identity
   → generate bounded canonical-root + policy searches
+       → submission and partitions
+       → networking
+       → FAQ, charging/accounting, purge, retention, and storage policy
   → search approved organization domains
   → classify scope deterministically from URL path / manifest-equivalent identity
        → target_site
@@ -13,7 +16,11 @@ CLI arguments + environment
        → official_web
        → manifest_declared (reserved)
        → unverified_local (reserved)
-  → fetch canonical root + high-value submission/networking pages
+  → rank URL/title topic evidence above noisy search snippets
+  → fetch canonical root + several high-value pages per topic
+       → reject already-attempted URLs
+       → continue after redirects, failures, or topic mismatches
+       → prefer article content over navigation chrome
   → retain a fetched sibling page as a negative control when budget permits
   → calculate deterministic topic coverage
   → bounded provider discovery loop
@@ -36,16 +43,22 @@ CLI arguments + environment
        → pages not rediscovered remain stored
   → build a transient CPU BM25 index
   → retrieve separately for every extraction field
+       → use several lexical query variants per field
        → site_scope is an input filter before ranking
        → allow target_site + applicable organization_general
        → exclude sibling + unrelated
+       → deduplicate byte-identical content from alternate URLs
+       → suppress navigation noise and field-incompatible hardware tables
        → include charging_model + purge_policy + cost_traps
        → retain whole Policies/FAQ candidates for those fields
   → one provider structured-extraction call over field-grouped chunks
+       → expose field-local references such as partitions:R1
+       → resolve references to canonical chunk IDs and URLs locally
   → validate every evidence item locally
        → chunk_id belongs to that field's retrieved list
        → evidence URL matches the chunk URL
        → quote is a literal substring of the chunk
+       → retry one complete extraction on validation failure using the same model
   → log every retrieved chunk, score, citation state, and retrieved-but-uncited ID
   → build detailed discovery report
        → run, discovery, source scope/trust, corpus fingerprint
